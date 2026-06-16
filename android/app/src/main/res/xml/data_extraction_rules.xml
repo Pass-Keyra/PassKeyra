@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Mitigation M6 (audit 2026-05-10) — Android 12+ data extraction rules.
+  Empeche que les donnees sensibles soient transferees via :
+  - Cloud backup (Google One Backup)
+  - Device-to-device transfer
+
+  android:allowBackup="false" dans le manifest ne couvre pas ces deux cas
+  sur Android 12+ : il faut ces rules en plus.
+
+  Strategie : exclude all by default. Aucune donnee PassKeyra ne quitte
+  l'appareil via les mecanismes systeme.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

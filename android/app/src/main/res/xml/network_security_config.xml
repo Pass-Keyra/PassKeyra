@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Mitigation M5 (audit 2026-05-10) — Politique reseau stricte pour PassKeyra.
+  - Aucun trafic cleartext (HTTP) autorise globalement.
+  - Tout le trafic doit passer par HTTPS avec validation TLS standard.
+  - Les domaines accessibles sont implicitement les seuls que l'app contacte
+    (Google APIs, Microsoft Graph, Firebase, AdMob, etc.) — aucune restriction
+    de domaine ici car la liste est mouvante (Firebase utilise plusieurs
+    sous-domaines dynamiques) et un blocage par domaine pourrait casser
+    silencieusement la sync ou les pubs.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

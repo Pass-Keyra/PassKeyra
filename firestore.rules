@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// PassKeyra Firestore Security Rules
+// Architecture zero-knowledge: les données sont déjà chiffrées côté client.
+// Ces règles empêchent un utilisateur authentifié d'accéder ou écraser
+// les blobs chiffrés d'un autre utilisateur.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Toutes les données utilisateur (vault, entries, categories) sont
+    // sous /users/{uid}/. Seul le propriétaire authentifié y a accès.
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid;
+    }
+
+    // Tout le reste est interdit par défaut.
+  }
+}

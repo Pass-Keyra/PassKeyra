@@ -1,0 +1,97 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+nul
+build_pid.txt
+.gradle_user/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Android KeyStore - IMPORTANT: Ne jamais committer les clés de signature!
+*.jks
+*.keystore
+key.properties
+
+# Hive database files (données utilisateur sensibles - pour tests locaux)
+*.hive
+*.lock
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Firebase config files (contiennent des clés API — chaque dev doit utiliser sa propre config)
+google-services.json
+GoogleService-Info.plist
+**/google-services.json
+**/GoogleService-Info.plist
+
+# Configuration locale (chemins SDK personnels)
+android/local.properties
+
+# Gradle caches additionnels
+android/.gradle/
+
+# Documents internes (sécurité supplémentaire — ne devraient pas être présents)
+/A tenir à jour/
+SESSION_*.md
+PREMIUM_DEV_TRACKER.md
+SESSIONS_ARCHIVE.md
+
+# Outils internes
+build_validator.py
+
+# VS Code
+.vscode/
+
+# Flutter generated platform files (auto-régénérés à chaque pub get)
+**/flutter/ephemeral/
+**/Flutter/ephemeral/
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/Generated.xcconfig
+macos/Flutter/ephemeral/
+
+# CocoaPods (iOS/macOS)
+**/Pods/
+**/Podfile.lock
