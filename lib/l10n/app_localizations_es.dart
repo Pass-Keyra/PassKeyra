@@ -15,10 +15,26 @@ class AppLocalizationsEs extends AppLocalizations {
   String get settings => 'Configuración';
 
   @override
+  String get settingsSubtitle =>
+      'Elija una sección para gestionar su aplicación fácilmente.';
+
+  @override
   String get security => 'Seguridad';
 
   @override
+  String get appearance => 'Apariencia';
+
+  @override
   String get premium => 'Premium';
+
+  @override
+  String get backupAndSync => 'Copia de seguridad y sincronización';
+
+  @override
+  String get keyboardShortcuts => 'Atajos de teclado';
+
+  @override
+  String get aboutAndSupport => 'Acerca de y soporte';
 
   @override
   String get organization => 'Organización';
@@ -88,10 +104,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get about => 'Acerca de';
 
   @override
-  String get aboutPremium => 'PassKeyra v1.1.0 (Premium activado)';
+  String get aboutPremium => 'PassKeyra v1.1.11 (Premium activado)';
 
   @override
-  String get aboutFree => 'PassKeyra v1.1.0';
+  String get aboutFree => 'PassKeyra v1.1.11';
 
   @override
   String get biometricMigrationTitle => 'Seguridad reforzada';
@@ -284,6 +300,46 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get biometryNotActivated => 'No se pudo activar la biometría.';
+
+  @override
+  String get weakBiometricWarningTitle =>
+      'Desbloqueo biométrico menos seguro en este dispositivo';
+
+  @override
+  String get weakBiometricWarningMessage =>
+      'Este dispositivo no cuenta con biometría fuerte. El desbloqueo biométrico es más práctico, pero menos seguro que tu contraseña maestra: una persona con acceso a tu teléfono podría saltárselo.\n\nTu caja fuerte sigue cifrada con tu contraseña maestra.\n\n¿Activar el desbloqueo biométrico de todas formas?';
+
+  @override
+  String get weakBiometricWarningActivateAnyway => 'Activar de todas formas';
+
+  @override
+  String get weakBiometricWarningKeepPassword => 'Mantener contraseña maestra';
+
+  @override
+  String get biometricReEnrollmentTitle => 'Huella modificada';
+
+  @override
+  String get biometricReEnrollmentMessage =>
+      'Por tu seguridad, los cambios en tus huellas han desactivado el desbloqueo biométrico. Introduce tu contraseña maestra una vez para reactivarlo.';
+
+  @override
+  String get biometricReEnrollmentButton => 'Introducir mi contraseña maestra';
+
+  @override
+  String get biometricUpgraded => 'Protección biométrica reforzada';
+
+  @override
+  String get biometricAuthSubtitleStrong => 'Protección reforzada (hardware)';
+
+  @override
+  String get biometricAuthSubtitleWeak => 'Protección estándar';
+
+  @override
+  String get selectAnEntry => 'Seleccione una entrada';
+
+  @override
+  String get selectAnEntryHint =>
+      'Haga clic en una entrada para ver sus detalles';
 
   @override
   String get connectionProblem => '¿Problema de Conexión?';
@@ -1563,10 +1619,6 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get onboardingBiometryMessage =>
       'Desbloqueo rápido y seguro con huella digital o reconocimiento facial.';
-
-  @override
-  String get onboardingClickHere =>
-      'Por favor, haga clic en el elemento resaltado';
 
   @override
   String get onboardingCompleteMessage =>

@@ -67,14 +67,6 @@ class _SettingsAppearancePageState extends State<SettingsAppearancePage>
       primaryLabel: l10n.onboardingNext,
       secondaryLabel: l10n.onboardingSkipTutorial,
       clearFocusInset: 20.0,
-      onWrongClick: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.onboardingClickHere),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
       stepIndicator: '1 / 3',
     );
 
@@ -96,14 +88,6 @@ class _SettingsAppearancePageState extends State<SettingsAppearancePage>
       message: "Changez le mode d'affichage (clair, sombre ou système) et choisissez votre police de caractères. Plus de polices disponibles avec Premium.",
       primaryLabel: l10n.onboardingNext,
       secondaryLabel: l10n.onboardingSkipTutorial,
-      onWrongClick: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.onboardingClickHere),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
       stepIndicator: '2 / 3',
     );
 
@@ -124,14 +108,6 @@ class _SettingsAppearancePageState extends State<SettingsAppearancePage>
       title: l10n.customCategories,
       message: l10n.customCategoriesSubtitle,
       primaryLabel: l10n.onboardingFinish,
-      onWrongClick: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.onboardingClickHere),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
       stepIndicator: '3 / 3',
     );
 

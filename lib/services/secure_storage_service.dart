@@ -10,6 +10,7 @@ class SecureStorageService {
     'biometric_keywrap',
   );
   static const String _hardwareWrapPrefix = 'hw1:';
+  static const String _hardwareWrapStrongPrefix = 'hw2:';
 
   // Options Android.
   // - encryptedSharedPreferences = true : EncryptedSharedPreferences (AES-GCM)
@@ -27,6 +28,8 @@ class SecureStorageService {
   static const String _kWrappedMasterKey = 'wrapped_master_key';
   static const String _kMasterKeyIterations = 'master_key_iterations';
   static const String _kBiometryEnabled = 'biometry_enabled';
+  static const String _kBiometricWeakWarningAccepted = 'biometric_weak_warning_accepted';
+  static const String _kBiometricMode = 'biometric_mode';
   static const String _kValidationToken = 'validation_token'; // Token pour valider le mot de passe
 
   // Clés pour Cloud Backup
@@ -121,6 +124,109 @@ class SecureStorageService {
     }
     return base64Decode(plaintextBase64);
   }
+
+  // -------------------------------------------------------------------------
+  // Chemin strong (Class 3) : BiometricPrompt + CryptoObject cote plugin
+  // -------------------------------------------------------------------------
+
+  Future<bool> canUseStrongBiometric() async {
+    try {
+      final result = await _biometricKeywrapChannel.invokeMethod<bool>(
+        'canUseStrongBiometric',
+      );
+      return result ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  Future<void> saveHardwareWrappedSessionKeyStrong(
+    List<int> sessionKey, {
+    required String promptTitle,
+    required String promptSubtitle,
+    required String promptCancel,
+  }) async {
+    final plaintextBase64 = base64Encode(sessionKey);
+    final wrappedBase64 = await _biometricKeywrapChannel.invokeMethod<String>(
+      'wrapKeyMaterialStrong',
+      {
+        'plaintextBase64': plaintextBase64,
+        'promptTitle': promptTitle,
+        'promptSubtitle': promptSubtitle,
+        'promptCancel': promptCancel,
+      },
+    );
+    if (wrappedBase64 == null || wrappedBase64.isEmpty) {
+      throw PlatformException(
+        code: 'HW_WRAP_EMPTY',
+        message: 'Le wrapping strong a retourne une valeur vide.',
+      );
+    }
+    await _storage.write(
+      key: _kWrappedMasterKey,
+      value: '$_hardwareWrapStrongPrefix$wrappedBase64',
+    );
+  }
+
+  Future<List<int>?> readHardwareWrappedSessionKeyStrong({
+    required String promptTitle,
+    required String promptSubtitle,
+    required String promptCancel,
+  }) async {
+    final raw = await _safeRead(_kWrappedMasterKey);
+    if (raw == null || !raw.startsWith(_hardwareWrapStrongPrefix)) {
+      return null;
+    }
+    final wrappedBase64 = raw.substring(_hardwareWrapStrongPrefix.length);
+    if (wrappedBase64.isEmpty) return null;
+
+    final plaintextBase64 = await _biometricKeywrapChannel.invokeMethod<String>(
+      'unwrapKeyMaterialStrong',
+      {
+        'wrappedBase64': wrappedBase64,
+        'promptTitle': promptTitle,
+        'promptSubtitle': promptSubtitle,
+        'promptCancel': promptCancel,
+      },
+    );
+    if (plaintextBase64 == null || plaintextBase64.isEmpty) return null;
+    return base64Decode(plaintextBase64);
+  }
+
+  /// Retourne 'strong', 'weak', ou null si aucune cle wrappee.
+  Future<String?> getWrappedKeyMode() async {
+    final raw = await _safeRead(_kWrappedMasterKey);
+    if (raw == null) return null;
+    if (raw.startsWith(_hardwareWrapStrongPrefix)) return 'strong';
+    if (raw.startsWith(_hardwareWrapPrefix)) return 'weak';
+    return 'legacy_plain';
+  }
+
+  // -------------------------------------------------------------------------
+  // Consentement et mode biometrique
+  // -------------------------------------------------------------------------
+
+  Future<void> setBiometricWeakWarningAccepted(bool accepted) async {
+    await _storage.write(
+      key: _kBiometricWeakWarningAccepted,
+      value: accepted ? '1' : '0',
+    );
+  }
+
+  Future<bool> isBiometricWeakWarningAccepted() async {
+    final v = await _safeRead(_kBiometricWeakWarningAccepted);
+    return v == '1';
+  }
+
+  Future<void> setBiometricMode(String mode) async {
+    await _storage.write(key: _kBiometricMode, value: mode);
+  }
+
+  Future<String?> readBiometricMode() => _safeRead(_kBiometricMode);
+
+  // -------------------------------------------------------------------------
 
   Future<void> _clearHardwareWrappingKey() async {
     try {
@@ -249,6 +355,21 @@ class SecureStorageService {
 
   Future<void> deleteKey(String key) async {
     await _storage.delete(key: key);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers génériques string (utilisés par GoogleSignInWindows pour persister
+  // le refresh_token OAuth chiffré DPAPI sur Windows). Les clés métier
+  // dédiées (Google Drive email, OneDrive token, etc.) restent au-dessus pour
+  // clarté ; ces helpers servent aux usages ad-hoc.
+  // ---------------------------------------------------------------------------
+
+  Future<void> writeString(String key, String value) async {
+    await _storage.write(key: key, value: value);
+  }
+
+  Future<String?> readString(String key) async {
+    return _safeRead(key);
   }
 }
 

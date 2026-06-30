@@ -17,9 +17,10 @@ import '../app/app.dart';
 import 'premium_page.dart';
 
 class EditEntryPage extends StatefulWidget {
-  const EditEntryPage({super.key, this.entry, this.startTutorial = false});
+  const EditEntryPage({super.key, this.entry, this.startTutorial = false, this.existingUsernames});
   final PasswordEntry? entry;
   final bool startTutorial;
+  final List<String>? existingUsernames;
 
   @override
   State<EditEntryPage> createState() => _EditEntryPageState();
@@ -42,6 +43,7 @@ class _EditEntryPageState extends State<EditEntryPage>
   List<Map<String, String>> _additionalPasswords = [];
   String? _selectedEmoji;
   Color _selectedIconColor = PassKeyraColors.primary;
+  List<String> _usernameSuggestions = const [];
 
   late final AnimationController _coachPulseController;
   final _emojiButtonKey          = GlobalKey();
@@ -68,6 +70,14 @@ class _EditEntryPageState extends State<EditEntryPage>
       WidgetsBinding.instance.addPostFrameCallback((_) => _runEditEntryTutorial());
     } else if (widget.entry == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _checkAndRunFirstEntryTutorial());
+    }
+    if (widget.existingUsernames != null) {
+      final freq = <String, int>{};
+      for (final u in widget.existingUsernames!) {
+        if (u.isNotEmpty) freq[u] = (freq[u] ?? 0) + 1;
+      }
+      _usernameSuggestions = freq.keys.toList()
+        ..sort((a, b) => freq[b]!.compareTo(freq[a]!));
     }
     final e = widget.entry;
     _name = TextEditingController(text: e?.name ?? '');
@@ -119,9 +129,6 @@ class _EditEntryPageState extends State<EditEntryPage>
       message: l10n.premiumTutorialEmojiMessage,
       primaryLabel: l10n.onboardingNext,
       secondaryLabel: l10n.onboardingSkipTutorial,
-      onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.onboardingClickHere), duration: const Duration(seconds: 1)),
-      ),
       stepIndicator: '1 / 2',
     );
 
@@ -141,9 +148,6 @@ class _EditEntryPageState extends State<EditEntryPage>
       title: l10n.premiumTutorialMultiPasswordTitle,
       message: l10n.premiumTutorialMultiPasswordMessage,
       primaryLabel: l10n.onboardingFinish,
-      onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.onboardingClickHere), duration: const Duration(seconds: 1)),
-      ),
       stepIndicator: '2 / 2',
     );
 
@@ -445,6 +449,46 @@ class _EditEntryPageState extends State<EditEntryPage>
     );
   }
 
+  /// Construit les items du dropdown de categorie en respectant la hierarchie :
+  /// chaque categorie racine est suivie de ses sous-categories, indentees.
+  List<DropdownMenuItem<String>> _buildCategoryDropdownItems() {
+    final items = <DropdownMenuItem<String>>[];
+
+    void addCategoryAndChildren(CustomCategory cat, int depth) {
+      items.add(DropdownMenuItem<String>(
+        value: cat.name,
+        child: Row(
+          children: [
+            SizedBox(width: depth * 20.0),
+            if (depth > 0)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  Icons.subdirectory_arrow_right,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            if (cat.isEmoji)
+              Text(cat.emoji!, style: const TextStyle(fontSize: 20))
+            else
+              Icon(cat.icon, color: cat.color, size: 20),
+            const SizedBox(width: 12),
+            Flexible(child: Text(cat.name, overflow: TextOverflow.ellipsis)),
+          ],
+        ),
+      ));
+      for (final child in _categoryService.getChildren(cat.id)) {
+        addCategoryAndChildren(child, depth + 1);
+      }
+    }
+
+    for (final root in _categoryService.getRootCategories()) {
+      addCategoryAndChildren(root, 0);
+    }
+    return items;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -551,22 +595,10 @@ class _EditEntryPageState extends State<EditEntryPage>
                     value: null,
                     child: Text(AppLocalizations.of(context)!.other),
                   ),
-                  ..._categories.map((category) => DropdownMenuItem<String>(
-                    value: category.name,
-                    child: Row(
-                      children: [
-                        if (category.isEmoji)
-                          Text(
-                            category.emoji!,
-                            style: const TextStyle(fontSize: 20),
-                          )
-                        else
-                          Icon(category.icon, color: category.color, size: 20),
-                        const SizedBox(width: 12),
-                        Text(category.name),
-                      ],
-                    ),
-                  )),
+                  // Categories ordonnees hierarchiquement : chaque parent suivi
+                  // de ses enfants, indentes selon la profondeur. Permet de
+                  // choisir une sous-categorie pour une entree.
+                  ..._buildCategoryDropdownItems(),
                 ],
                 onChanged: (value) {
                   setState(() => _selectedCategory = value);
@@ -574,13 +606,38 @@ class _EditEntryPageState extends State<EditEntryPage>
                 },
               ),
               const SizedBox(height: 12),
-              TextFormField(
-                key: _usernameFieldKey,
-                controller: _username,
-                inputFormatters: [LengthLimitingTextInputFormatter(512)],
-                decoration: InputDecoration(labelText: AppLocalizations.of(context)!.username, border: const OutlineInputBorder()),
-                onChanged: (_) => AutoCloseService.instance.onUserActivity(),
-              ),
+              _usernameSuggestions.isEmpty
+                ? TextFormField(
+                    key: _usernameFieldKey,
+                    controller: _username,
+                    inputFormatters: [LengthLimitingTextInputFormatter(512)],
+                    decoration: InputDecoration(labelText: AppLocalizations.of(context)!.username, border: const OutlineInputBorder()),
+                    onChanged: (_) => AutoCloseService.instance.onUserActivity(),
+                  )
+                : Autocomplete<String>(
+                    initialValue: _username.value,
+                    optionsBuilder: (textEditingValue) {
+                      if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
+                      final query = textEditingValue.text.toLowerCase();
+                      return _usernameSuggestions.where((s) => s.toLowerCase().contains(query));
+                    },
+                    fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                      return TextFormField(
+                        key: _usernameFieldKey,
+                        controller: controller,
+                        focusNode: focusNode,
+                        inputFormatters: [LengthLimitingTextInputFormatter(512)],
+                        decoration: InputDecoration(labelText: AppLocalizations.of(context)!.username, border: const OutlineInputBorder()),
+                        onChanged: (v) {
+                          _username.text = v;
+                          AutoCloseService.instance.onUserActivity();
+                        },
+                      );
+                    },
+                    onSelected: (value) {
+                      _username.text = value;
+                    },
+                  ),
               const SizedBox(height: 12),
               Row(
                 key: _passwordRowKey,

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'firebase/rest/cloud_debug_log.dart';
 import '../models/custom_category.dart';
 import '../models/password_entry.dart';
 import '../models/backup_payload.dart';
@@ -115,16 +116,20 @@ class SyncCoordinatorService {
     // Restaurer la session Google uniquement pour les utilisateurs Premium
     // Les utilisateurs gratuits n'utilisent pas Firebase/Google → pas de popup inutile au démarrage
     final isPremium = PremiumService().isPremium;
+    cloudLog('SyncCoordinator.initialize : isPremium=$isPremium');
     if (isPremium) {
       debugPrint('SyncCoordinatorService - Tentative de restauration session Google (Premium)...');
       final restoredUser = await _firebaseAuthService.restoreSession();
       if (restoredUser != null) {
         debugPrint('SyncCoordinatorService - Session Google restaurée: ${restoredUser.email}');
+        cloudLog('SyncCoordinator : session restauree email=${restoredUser.email}');
       } else {
         debugPrint('SyncCoordinatorService - Aucune session à restaurer ou restauration échouée');
+        cloudLog('SyncCoordinator : restoreSession retourne null');
       }
     } else {
       debugPrint('SyncCoordinatorService - Utilisateur gratuit, restauration session ignorée');
+      cloudLog('SyncCoordinator : NON-Premium, restauration ignoree');
     }
 
     // Initialiser Firebase Sync (maintenant l'utilisateur devrait être connecté si session restaurée)
@@ -310,9 +315,11 @@ class SyncCoordinatorService {
     if (syncEnabled && isPremium && isSignedIn) {
       // Utiliser le debounce pour optimiser les syncs
       debugPrint('SyncCoordinatorService - Sync automatique planifiée');
+      cloudLog('saveAll : upload planifie (${entries.length} entries)');
       _firebaseSyncService.syncWithDebounce(entries);
     } else {
       debugPrint('SyncCoordinatorService - Sync ignorée (conditions non remplies)');
+      cloudLog('saveAll : upload IGNORE (syncEnabled=$syncEnabled isPremium=$isPremium isSignedIn=$isSignedIn)');
     }
 
     // Déclencher le backup automatique cloud (Google Drive/OneDrive)

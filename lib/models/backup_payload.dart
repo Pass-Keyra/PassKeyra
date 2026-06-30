@@ -16,7 +16,8 @@ class BackupPayload {
     required this.tag,
     required this.exportedAt,
     this.entryCount = 0,
-    this.iterations = 600000, // Nombre d'itérations PBKDF2 (rétrocompatibilité)
+    this.iterations = 600000,
+    this.schemaVersion = 2,
   });
 
   final String salt;
@@ -25,7 +26,12 @@ class BackupPayload {
   final String tag;
   final DateTime exportedAt;
   final int entryCount;
-  final int iterations; // Nombre d'itérations PBKDF2 utilisées pour chiffrer
+  final int iterations;
+  // Schema v1 : pas de sous-categories (parentId absent dans CustomCategory).
+  // Schema v2 : CustomCategory peut avoir un parentId (nullable).
+  // La lecture est retrocompatible : un payload v1 est lu comme v2 avec
+  // parentId=null sur toutes les categories.
+  final int schemaVersion;
 
   Map<String, dynamic> toJson() => {
         'salt': salt,
@@ -34,7 +40,8 @@ class BackupPayload {
         'tag': tag,
         'exportedAt': exportedAt.toIso8601String(),
         'entryCount': entryCount,
-        'iterations': iterations, // Inclure iterations pour rétrocompatibilité
+        'iterations': iterations,
+        'schema': schemaVersion,
       };
 
   String toJsonString() => jsonEncode(toJson());
@@ -98,6 +105,9 @@ class BackupPayload {
       'PAYLOAD_PARSE keys=${jsonKeys.join(",")} iterations=$iterations saltChars=${salt.length} ivChars=${iv.length} ctChars=${ciphertext.length} tagChars=${tag.length} entryCount=$entryCount',
     );
 
+    // Schema version (v1 si absent = avant sous-categories, v2 = avec parentId)
+    final schemaVersion = (json['schema'] as int?) ?? 1;
+
     return BackupPayload(
       salt: salt,
       iv: iv,
@@ -106,6 +116,7 @@ class BackupPayload {
       exportedAt: exportedAt,
       entryCount: entryCount,
       iterations: iterations,
+      schemaVersion: schemaVersion,
     );
   }
 

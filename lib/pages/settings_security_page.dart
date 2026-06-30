@@ -59,6 +59,7 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
 
   bool _biometryEnabled = false;
   bool _biometryAvailable = false;
+  String? _biometricMode;
   Duration _lockTimeout = const Duration(minutes: 2);
   Duration _autoCloseTimeout = const Duration(minutes: 1);
   bool _autoCloseEnabled = false;
@@ -133,9 +134,12 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
     }
 
     if (!mounted) return;
+    final biometricMode = await _storage.readBiometricMode();
+
     setState(() {
       _biometryEnabled = enabled;
       _biometryAvailable = canCheck && isSupported;
+      _biometricMode = biometricMode;
       _lockTimeout = _lockService.lockTimeout;
       _autoCloseTimeout = _autoCloseService.autoCloseTimeout;
       _autoCloseEnabled = _autoCloseService.isEnabled;
@@ -158,45 +162,74 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
           return;
         }
 
-        // Auth biométrique au niveau applicatif via local_auth (accepte STRONG,
-        // WEAK et CONVENIENCE → permet face unlock sur tablettes/Pixel).
-        final authenticated = await _localAuth.authenticate(
-          localizedReason: AppLocalizations.of(context)!.biometricAuth,
-          options: const AuthenticationOptions(
-            biometricOnly: true,
-            stickyAuth: true,
-            sensitiveTransaction: true,
-          ),
-          authMessages: const [
-            AndroidAuthMessages(
-              signInTitle: 'Authentification requise',
-              biometricHint: 'Vérifiez votre identité',
-              cancelButton: 'Annuler',
-              biometricNotRecognized: 'Non reconnu. Réessayez.',
-              goToSettingsButton: 'Paramètres',
-              goToSettingsDescription: 'La biométrie n\'est pas configurée sur cet appareil.',
-              biometricRequiredTitle: 'Biométrie requise',
+        final l10n = AppLocalizations.of(context)!;
+        final canStrong = await _storage.canUseStrongBiometric();
+
+        if (canStrong) {
+          // Class 3 : le BiometricPrompt est pilote par le plugin Kotlin
+          // avec CryptoObject. Pas de local_auth.authenticate().
+          await widget.auth.storeWrappedKeyForBiometrics(
+            promptTitle: l10n.biometricAuth,
+            promptSubtitle: l10n.biometricAuthSubtitle,
+            promptCancel: l10n.cancel,
+          );
+          if (!mounted) return;
+          setState(() {
+            _biometryEnabled = true;
+            _biometricMode = 'strong';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(l10n.biometryEnabled),
+              backgroundColor: PassKeyraColors.success,
             ),
-          ],
-        );
+          );
+        } else {
+          // Class 1/2 : consentement eclaire puis local_auth.
+          final warningAccepted = await _storage.isBiometricWeakWarningAccepted();
+          if (!warningAccepted) {
+            final accepted = await _showWeakBiometricConsentDialog();
+            if (accepted != true) return;
+            await _storage.setBiometricWeakWarningAccepted(true);
+          }
 
-        if (!authenticated) {
-          // Annulation user : silencieux, le prompt local_auth a géré l'UX.
-          return;
+          final authenticated = await _localAuth.authenticate(
+            localizedReason: l10n.biometricAuth,
+            options: const AuthenticationOptions(
+              biometricOnly: true,
+              stickyAuth: true,
+              sensitiveTransaction: true,
+            ),
+            authMessages: const [
+              AndroidAuthMessages(
+                signInTitle: 'Authentification requise',
+                biometricHint: 'Vérifiez votre identité',
+                cancelButton: 'Annuler',
+                biometricNotRecognized: 'Non reconnu. Réessayez.',
+                goToSettingsButton: 'Paramètres',
+                goToSettingsDescription: 'La biométrie n\'est pas configurée sur cet appareil.',
+                biometricRequiredTitle: 'Biométrie requise',
+              ),
+            ],
+          );
+
+          if (!authenticated) return;
+
+          await widget.auth.storeWrappedKeyForBiometrics();
+          if (!mounted) return;
+          setState(() {
+            _biometryEnabled = true;
+            _biometricMode = 'weak';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(l10n.biometryEnabled),
+              backgroundColor: PassKeyraColors.success,
+            ),
+          );
         }
-
-        await widget.auth.storeWrappedKeyForBiometrics();
-        if (!mounted) return;
-        setState(() => _biometryEnabled = true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(AppLocalizations.of(context)!.biometryEnabled),
-            backgroundColor: PassKeyraColors.success,
-          ),
-        );
       } on PlatformException catch (e) {
         if (!mounted) return;
-        // Codes local_auth standards (NotEnrolled, NotAvailable, LockedOut, etc.)
         if (e.code == 'NotEnrolled') {
           await showDialog<void>(
             context: context,
@@ -220,7 +253,7 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
               ],
             ),
           );
-        } else if (e.code != 'UserCanceled') {
+        } else if (e.code != 'UserCanceled' && e.code != 'BIOMETRIC_ERROR') {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Erreur : ${e.message ?? e.code}'),
@@ -243,9 +276,34 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
     await _storage.setBiometryEnabled(false);
     await _storage.deleteWrappedKey();
     if (!mounted) return;
-    setState(() => _biometryEnabled = false);
+    setState(() {
+      _biometryEnabled = false;
+      _biometricMode = null;
+    });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(AppLocalizations.of(context)!.biometryDisabled)),
+    );
+  }
+
+  Future<bool?> _showWeakBiometricConsentDialog() {
+    final l10n = AppLocalizations.of(context)!;
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.info_outline, size: 48, color: Colors.orange),
+        title: Text(l10n.weakBiometricWarningTitle),
+        content: Text(l10n.weakBiometricWarningMessage),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(l10n.weakBiometricWarningKeepPassword),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(l10n.weakBiometricWarningActivateAnyway),
+          ),
+        ],
+      ),
     );
   }
 
@@ -749,41 +807,40 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            RadioListTile<bool>(
-              title: Text(l10n.autoCloseDisabled),
-              value: false,
-              groupValue: _autoCloseEnabled,
-              onChanged: (v) async {
-                if (v == null) return;
-                await _autoCloseService.setEnabled(v);
-                if (!mounted) return;
-                setState(() => _autoCloseEnabled = v);
-                Navigator.pop(context);
-              },
-            ),
-            _autoCloseDurationOption(l10n.autoClose30s, const Duration(seconds: 30)),
-            _autoCloseDurationOption(l10n.autoClose45s, const Duration(seconds: 45)),
-            _autoCloseDurationOption(l10n.autoClose1m, const Duration(minutes: 1)),
+            // Groupe radio unique : null = "Désactivé", sinon la durée.
+            // Évite que la pastille "Désactivé" et une durée restent cochées
+            // simultanément.
+            _autoCloseOption(l10n.autoCloseDisabled, null),
+            _autoCloseOption(l10n.autoClose30s, const Duration(seconds: 30)),
+            _autoCloseOption(l10n.autoClose45s, const Duration(seconds: 45)),
+            _autoCloseOption(l10n.autoClose1m, const Duration(minutes: 1)),
           ],
         ),
       ),
     );
   }
 
-  Widget _autoCloseDurationOption(String title, Duration value) {
-    return RadioListTile<Duration>(
+  Widget _autoCloseOption(String title, Duration? value) {
+    // Valeur du groupe : null quand la fermeture auto est désactivée.
+    final selected = _autoCloseEnabled ? _autoCloseTimeout : null;
+    return RadioListTile<Duration?>(
       title: Text(title),
       value: value,
-      groupValue: _autoCloseTimeout,
+      groupValue: selected,
       onChanged: (v) async {
-        if (v == null) return;
-        await _autoCloseService.setAutoCloseTimeout(v);
-        await _autoCloseService.setEnabled(true);
-        if (!mounted) return;
-        setState(() {
-          _autoCloseTimeout = v;
-          _autoCloseEnabled = true;
-        });
+        if (v == null) {
+          await _autoCloseService.setEnabled(false);
+          if (!mounted) return;
+          setState(() => _autoCloseEnabled = false);
+        } else {
+          await _autoCloseService.setAutoCloseTimeout(v);
+          await _autoCloseService.setEnabled(true);
+          if (!mounted) return;
+          setState(() {
+            _autoCloseTimeout = v;
+            _autoCloseEnabled = true;
+          });
+        }
         Navigator.pop(context);
       },
     );
@@ -877,9 +934,6 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
       primaryLabel: l10n.onboardingNext,
       secondaryLabel: l10n.onboardingSkipTutorial,
       clearFocusInset: 20.0,
-      onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.onboardingClickHere), duration: const Duration(seconds: 2)),
-      ),
       stepIndicator: '1 / $totalSteps',
     );
     if (step1 != CoachStepResult.primary || !mounted) {
@@ -900,9 +954,6 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
           : l10n.onboardingBiometryMessage,
       primaryLabel: l10n.onboardingNext,
       secondaryLabel: l10n.onboardingSkipTutorial,
-      onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.onboardingClickHere), duration: const Duration(seconds: 2)),
-      ),
       stepIndicator: '2 / $totalSteps',
     );
     if (step2 != CoachStepResult.primary || !mounted) {
@@ -921,9 +972,6 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
       message: l10n.onboardingLockTimeoutMessage,
       primaryLabel: l10n.onboardingNext,
       secondaryLabel: l10n.onboardingSkipTutorial,
-      onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.onboardingClickHere), duration: const Duration(seconds: 2)),
-      ),
       stepIndicator: '3 / $totalSteps',
     );
     if (step3 != CoachStepResult.primary || !mounted) {
@@ -943,9 +991,6 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
         message: l10n.onboardingAutoCloseMessage,
         primaryLabel: l10n.onboardingNext,
         secondaryLabel: l10n.onboardingSkipTutorial,
-        onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.onboardingClickHere), duration: const Duration(seconds: 2)),
-        ),
         stepIndicator: '4 / $totalSteps',
       );
       if (step4 != CoachStepResult.primary || !mounted) {
@@ -964,9 +1009,6 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
       title: l10n.onboardingLoginAttemptsTitle,
       message: l10n.onboardingLoginAttemptsMessage,
       primaryLabel: l10n.onboardingFinish,
-      onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.onboardingClickHere), duration: const Duration(seconds: 2)),
-      ),
       stepIndicator: '$totalSteps / $totalSteps',
     );
 
@@ -1014,7 +1056,11 @@ class _SettingsSecurityPageState extends State<SettingsSecurityPage>
                 isDesktop
                     ? l10n.biometryDesktopComingSoon
                     : (_biometryAvailable
-                        ? l10n.biometricAuthSubtitle
+                        ? (_biometryEnabled && _biometricMode == 'strong'
+                            ? l10n.biometricAuthSubtitleStrong
+                            : (_biometryEnabled && _biometricMode == 'weak'
+                                ? l10n.biometricAuthSubtitleWeak
+                                : l10n.biometricAuthSubtitle))
                         : l10n.biometricAuthNotAvailable),
               ),
               value: _biometryEnabled,

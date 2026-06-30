@@ -263,6 +263,49 @@ class CategoryService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Deplace une categorie d'un cran vers le haut parmi ses freres (meme
+  /// parent). Ne fait rien si elle est deja en premiere position.
+  /// Utilise sur desktop ou l'arbre n'a pas de drag-and-drop.
+  Future<void> moveCategoryUp(String categoryId) async {
+    final cat = _categories.where((c) => c.id == categoryId).firstOrNull;
+    if (cat == null) return;
+
+    final siblings = _categories.where((c) => c.parentId == cat.parentId).toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
+    final index = siblings.indexWhere((c) => c.id == categoryId);
+    if (index <= 0) return;
+
+    await _swapOrder(cat.id, siblings[index - 1].id);
+  }
+
+  /// Deplace une categorie d'un cran vers le bas parmi ses freres (meme
+  /// parent). Ne fait rien si elle est deja en derniere position.
+  Future<void> moveCategoryDown(String categoryId) async {
+    final cat = _categories.where((c) => c.id == categoryId).firstOrNull;
+    if (cat == null) return;
+
+    final siblings = _categories.where((c) => c.parentId == cat.parentId).toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
+    final index = siblings.indexWhere((c) => c.id == categoryId);
+    if (index < 0 || index >= siblings.length - 1) return;
+
+    await _swapOrder(cat.id, siblings[index + 1].id);
+  }
+
+  Future<void> _swapOrder(String idA, String idB) async {
+    final indexA = _categories.indexWhere((c) => c.id == idA);
+    final indexB = _categories.indexWhere((c) => c.id == idB);
+    if (indexA < 0 || indexB < 0) return;
+
+    final orderA = _categories[indexA].order;
+    final orderB = _categories[indexB].order;
+    _categories[indexA] = _categories[indexA].copyWith(order: orderB);
+    _categories[indexB] = _categories[indexB].copyWith(order: orderA);
+
+    await _saveCategories();
+    notifyListeners();
+  }
+
   // Obtenir la catégorie "Autre" (fallback)
   CustomCategory getOtherCategory() {
     return _categories.firstWhere(
@@ -271,7 +314,121 @@ class CategoryService extends ChangeNotifier {
     );
   }
 
-  // Réinitialiser aux catégories par défaut
+  // ===========================================================================
+  // Sous-categories (Phase 3 Desktop V1)
+  // ===========================================================================
+
+  /// True si la categorie a au moins un enfant direct.
+  bool hasChildren(String categoryId) {
+    return _categories.any((cat) => cat.parentId == categoryId);
+  }
+
+  /// Enfants directs d'une categorie, tries par ordre.
+  List<CustomCategory> getChildren(String parentId) {
+    return _categories
+        .where((cat) => cat.parentId == parentId)
+        .toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
+  }
+
+  /// Categories racine (pas de parent), triees par ordre.
+  List<CustomCategory> getRootCategories() {
+    return _categories
+        .where((cat) => cat.isRoot)
+        .toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
+  }
+
+  /// Profondeur d'une categorie dans l'arbre (0 = racine, 1 = enfant, etc.).
+  int getDepth(String categoryId) {
+    int depth = 0;
+    String? currentId = categoryId;
+    final visited = <String>{};
+    while (currentId != null && depth < 10) {
+      if (visited.contains(currentId)) break;
+      visited.add(currentId);
+      final cat = getCategoryById(currentId);
+      if (cat == null || cat.parentId == null) break;
+      currentId = cat.parentId;
+      depth++;
+    }
+    return depth;
+  }
+
+  /// Verifie qu'assigner [parentId] a la categorie [categoryId] ne creerait
+  /// pas de boucle. Retourne true si OK, false si boucle detectee.
+  bool canSetParent(String categoryId, String? parentId) {
+    if (parentId == null) return true;
+    if (parentId == categoryId) return false;
+    // Remonter la chaine des parents : si on retombe sur categoryId, boucle.
+    String? current = parentId;
+    final visited = <String>{categoryId};
+    while (current != null) {
+      if (visited.contains(current)) return false;
+      visited.add(current);
+      final cat = getCategoryById(current);
+      current = cat?.parentId;
+    }
+    return true;
+  }
+
+  /// Profondeur max autorisee pour les sous-categories.
+  static const int maxDepth = 3;
+
+  /// Verifie qu'assigner [parentId] ne depasse pas la profondeur max.
+  bool canSetParentWithinDepth(String categoryId, String? parentId) {
+    if (parentId == null) return true;
+    final parentDepth = getDepth(parentId);
+    return parentDepth + 1 < maxDepth;
+  }
+
+  /// Ajouter une sous-categorie.
+  Future<CustomCategory> addSubCategory({
+    required String parentId,
+    required String name,
+    required Color color,
+    required IconData icon,
+    String? emoji,
+    bool isRoundShape = false,
+  }) async {
+    // Le parent doit exister.
+    final parent = getCategoryById(parentId);
+    if (parent == null) {
+      throw Exception('Categorie parente introuvable');
+    }
+    // Verifier la profondeur : le parent doit etre a une profondeur < maxDepth-1
+    // pour que l'enfant reste dans la limite (racine=0, max 3 niveaux).
+    if (getDepth(parentId) + 1 >= maxDepth) {
+      throw Exception('Profondeur maximale atteinte');
+    }
+    if (_categories.any((cat) => cat.name.toLowerCase() == name.toLowerCase())) {
+      throw Exception('Une categorie avec ce nom existe deja');
+    }
+
+    final int maxOrder = _categories.isEmpty
+        ? 0
+        : _categories.map((c) => c.order).reduce((a, b) => a > b ? a : b);
+
+    final newCategory = CustomCategory(
+      id: _uuid.v4(),
+      name: name,
+      colorValue: color.value,
+      iconCodePoint: icon.codePoint,
+      order: maxOrder + 1,
+      isDefault: false,
+      isDeletable: true,
+      emoji: emoji,
+      isRoundShape: isRoundShape,
+      parentId: parentId,
+    );
+
+    _categories.add(newCategory);
+    await _saveCategories();
+    notifyListeners();
+    return newCategory;
+  }
+
+  // Reinitialiser aux categories par defaut
   Future<void> resetToDefaults() async {
     _categories = List.from(_defaultCategories);
     await _saveCategories();

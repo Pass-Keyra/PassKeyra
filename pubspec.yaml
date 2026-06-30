@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.0+15
+version: 1.1.11+17
 
 environment:
   sdk: ^3.8.1
@@ -73,6 +73,12 @@ dependencies:
 
   # Desktop V1 — gestion de la fenêtre Windows (taille, position, persistance)
   window_manager: ^0.4.0
+
+  # Desktop V1 — Phase 5 sync cloud Windows : `google_sign_in` ne supporte pas
+  # Windows. On utilise OAuth web flow custom via `googleapis_auth` (ouvre
+  # navigateur, capte le callback sur localhost via `shelf`).
+  googleapis_auth: ^1.6.0
+  shelf: ^1.4.1
 
 dev_dependencies:
   flutter_test:

@@ -15,10 +15,26 @@ class AppLocalizationsFr extends AppLocalizations {
   String get settings => 'Paramètres';
 
   @override
+  String get settingsSubtitle =>
+      'Choisissez une rubrique pour gérer votre application simplement.';
+
+  @override
   String get security => 'Sécurité';
 
   @override
+  String get appearance => 'Apparence';
+
+  @override
   String get premium => 'Premium';
+
+  @override
+  String get backupAndSync => 'Sauvegarde & Synchronisation';
+
+  @override
+  String get keyboardShortcuts => 'Raccourcis clavier';
+
+  @override
+  String get aboutAndSupport => 'À propos et support';
 
   @override
   String get organization => 'Organisation';
@@ -89,10 +105,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get about => 'À propos';
 
   @override
-  String get aboutPremium => 'PassKeyra v1.1.0 (Premium activé)';
+  String get aboutPremium => 'PassKeyra v1.1.11 (Premium activé)';
 
   @override
-  String get aboutFree => 'PassKeyra v1.1.0';
+  String get aboutFree => 'PassKeyra v1.1.11';
 
   @override
   String get biometricMigrationTitle => 'Sécurité renforcée';
@@ -283,6 +299,47 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get biometryNotActivated => 'La biométrie n\'a pas pu être activée.';
+
+  @override
+  String get weakBiometricWarningTitle =>
+      'Déverrouillage biométrique moins sécurisé sur cet appareil';
+
+  @override
+  String get weakBiometricWarningMessage =>
+      'Cet appareil ne dispose pas d\'une biométrie forte. Le déverrouillage biométrique y est plus pratique, mais moins sûr que votre mot de passe maître : une personne ayant accès à votre téléphone pourrait potentiellement le contourner.\n\nVotre coffre reste chiffré par votre mot de passe maître.\n\nActiver quand même le déverrouillage biométrique ?';
+
+  @override
+  String get weakBiometricWarningActivateAnyway => 'Activer quand même';
+
+  @override
+  String get weakBiometricWarningKeepPassword =>
+      'Garder le mot de passe maître';
+
+  @override
+  String get biometricReEnrollmentTitle => 'Empreinte modifiée';
+
+  @override
+  String get biometricReEnrollmentMessage =>
+      'Pour votre sécurité, la modification de vos empreintes a désactivé le déverrouillage biométrique. Saisissez votre mot de passe maître une fois pour le réactiver.';
+
+  @override
+  String get biometricReEnrollmentButton => 'Saisir mon mot de passe maître';
+
+  @override
+  String get biometricUpgraded => 'Protection biométrique renforcée';
+
+  @override
+  String get biometricAuthSubtitleStrong => 'Protection renforcée (matérielle)';
+
+  @override
+  String get biometricAuthSubtitleWeak => 'Protection standard';
+
+  @override
+  String get selectAnEntry => 'Sélectionnez une entrée';
+
+  @override
+  String get selectAnEntryHint =>
+      'Cliquez sur une entrée pour voir ses détails';
 
   @override
   String get connectionProblem => 'Problème de connexion ?';
@@ -1563,10 +1620,6 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get onboardingBiometryMessage =>
       'Déverrouillage rapide et sécurisé avec empreinte digitale ou reconnaissance faciale.';
-
-  @override
-  String get onboardingClickHere =>
-      'Veuillez cliquer sur l\'élément en surbrillance';
 
   @override
   String get onboardingCompleteMessage =>

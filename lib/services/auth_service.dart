@@ -192,11 +192,48 @@ class AuthService {
     }
   }
 
-  Future<bool> unlockWithBiometrics() async {
+  Future<bool> unlockWithBiometrics({
+    String promptTitle = 'PassKeyra',
+    String promptSubtitle = '',
+    String promptCancel = 'Annuler',
+  }) async {
     _log('AuthService - unlockWithBiometrics() appelé');
     _requiresBiometricMigration = false;
-    // 1) Chemin prioritaire: clé enveloppée matériellement (Keystore)
-    // L'auth biométrique a déjà été faite côté UI via local_auth.
+
+    // Detecter le mode du blob stocke pour router vers le bon chemin.
+    final mode = await _secureStorage.getWrappedKeyMode();
+
+    // --- Chemin strong (Class 3) : le plugin gere le BiometricPrompt ---
+    if (mode == 'strong') {
+      try {
+        final key = await _secureStorage.readHardwareWrappedSessionKeyStrong(
+          promptTitle: promptTitle,
+          promptSubtitle: promptSubtitle,
+          promptCancel: promptCancel,
+        );
+        if (key != null) {
+          _currentKey = key;
+          _currentKeyIterations = await _secureStorage.readKeyIterations() ?? 150000;
+          await _secureStorage.saveKeyIterations(_currentKeyIterations!);
+          _log('AUTH_KEY_SRC biometrics strong_wrap iterations=$_currentKeyIterations');
+          return true;
+        }
+      } on PlatformException catch (e) {
+        if (e.code == 'KEY_INVALIDATED') {
+          _log('AuthService - Cle strong invalidee (empreinte changee)');
+          _requiresBiometricMigration = true;
+          return false;
+        }
+        if (e.code == 'BIOMETRIC_ERROR') {
+          _log('AuthService - BiometricPrompt annule/erreur: ${e.message}');
+          return false;
+        }
+        _log('AuthService - Echec unwrap strong (${e.code}): ${e.message}');
+        rethrow;
+      }
+    }
+
+    // --- Chemin faible (Class 1/2) : local_auth a deja ete appele par l'UI ---
     try {
       final hardwareWrappedKey =
           await _secureStorage.readHardwareWrappedSessionKey();
@@ -205,13 +242,10 @@ class AuthService {
         _currentKeyIterations = await _secureStorage.readKeyIterations() ?? 150000;
         await _secureStorage.saveKeyIterations(_currentKeyIterations!);
         _log('AUTH_KEY_SRC biometrics hardware_wrap iterations=$_currentKeyIterations');
-        _log('AuthService - Clé biométrique hardware unwrapped avec succès');
         return true;
       }
     } on PlatformException catch (e) {
       _log('AuthService - Echec unwrap hardware (${e.code}): ${e.message}');
-      // Continue vers le fallback legacy ci-dessous (qui détectera hw1: et
-      // déclenchera la migration via _requiresBiometricMigration).
     } catch (e) {
       _log('AuthService - Echec unwrap hardware, fallback legacy: $e');
     }
@@ -246,11 +280,15 @@ class AuthService {
     return false;
   }
 
-  Future<void> storeWrappedKeyForBiometrics() async {
+  Future<void> storeWrappedKeyForBiometrics({
+    String promptTitle = 'PassKeyra',
+    String promptSubtitle = '',
+    String promptCancel = 'Annuler',
+  }) async {
     if (_currentKey == null) {
       throw Exception('Aucune clé de session disponible. Veuillez vous reconnecter.');
     }
-    
+
     if (_currentSalt != null) {
       await _secureStorage.saveSalt(_currentSalt!);
     }
@@ -258,13 +296,26 @@ class AuthService {
     final iterationsToStore = _currentKeyIterations ?? CryptoService.defaultIterations;
     await _secureStorage.saveKeyIterations(iterationsToStore);
 
-    // FIX SECURITY : aucun fallback en clair. Si le hardware wrap échoue
-    // (BiometricPrompt annulé, plateforme sans support, etc.), l'exception
-    // remonte à l'UI qui informe le user "biométrie non activée".
-    // setBiometryEnabled(true) n'est appelé QUE si le wrap a réellement réussi.
-    await _secureStorage.saveHardwareWrappedSessionKey(_currentKey!);
+    final canStrong = await _secureStorage.canUseStrongBiometric();
+
+    if (canStrong) {
+      // Class 3 : wrapping avec BiometricPrompt + CryptoObject cote plugin.
+      await _secureStorage.saveHardwareWrappedSessionKeyStrong(
+        _currentKey!,
+        promptTitle: promptTitle,
+        promptSubtitle: promptSubtitle,
+        promptCancel: promptCancel,
+      );
+      await _secureStorage.setBiometricMode('strong');
+      _log('AuthService - Cle biometrique stockee avec wrapping strong (Class 3)');
+    } else {
+      // Class 1/2 : wrapping sans auth Keystore (local_auth cote UI).
+      await _secureStorage.saveHardwareWrappedSessionKey(_currentKey!);
+      await _secureStorage.setBiometricMode('weak');
+      _log('AuthService - Cle biometrique stockee avec wrapping weak (Class 1/2)');
+    }
+
     await _secureStorage.setBiometryEnabled(true);
-    _log('AuthService - Clé biométrique stockée avec wrapping matériel');
   }
   
   /// Cleanup de sécurité au démarrage : détecte les clés legacy plain laissées
@@ -279,13 +330,49 @@ class AuthService {
 
     final wrapped = await _secureStorage.readWrappedKey();
     if (wrapped == null) return;
-    if (wrapped.startsWith('hw1:')) return; // clé hardware OK
+    if (wrapped.startsWith('hw1:') || wrapped.startsWith('hw2:')) return;
 
     // Clé legacy plain détectée alors que biométrie est marquée enabled
     // → état hérité du Bug A (catch silencieux). Suppression + désactivation.
     _log('AuthService - SECURITY CLEANUP : clé legacy plain supprimée, biométrie désactivée');
     await _secureStorage.deleteWrappedKey();
     await _secureStorage.setBiometryEnabled(false);
+  }
+
+  /// Migration opportuniste v1/weak -> v2-strong.
+  /// Appelee apres un login MDP maitre reussi si l'appareil est Class 3
+  /// et que le blob actuel n'est pas encore en mode strong.
+  /// Non-fatale : si le wrap echoue, l'ancien blob reste valide.
+  Future<bool> opportunisticStrongMigration({
+    required String promptTitle,
+    required String promptSubtitle,
+    required String promptCancel,
+  }) async {
+    if (_currentKey == null) return false;
+
+    final canStrong = await _secureStorage.canUseStrongBiometric();
+    if (!canStrong) return false;
+
+    final currentMode = await _secureStorage.getWrappedKeyMode();
+    if (currentMode == 'strong') return false;
+
+    final biometryEnabled = await _secureStorage.isBiometryEnabled();
+    if (!biometryEnabled) return false;
+
+    try {
+      await _secureStorage.saveHardwareWrappedSessionKeyStrong(
+        _currentKey!,
+        promptTitle: promptTitle,
+        promptSubtitle: promptSubtitle,
+        promptCancel: promptCancel,
+      );
+      await _secureStorage.setBiometricMode('strong');
+      _log('AuthService - Migration opportuniste vers strong reussie');
+      return true;
+    } catch (e) {
+      _log('AuthService - Migration opportuniste echouee (non-fatal): $e');
+      return false;
+    }
   }
 
   /// Force la création d'un nouveau token de validation avec la clé actuelle
@@ -359,18 +446,18 @@ class AuthService {
     await _secureStorage.saveValidationToken(validationEncrypted);
     _log('AuthService - Token de validation v2 mis à jour avec la nouvelle clé');
     
-    // 6. Mettre à jour la clé biométrique si elle existe
+    // 6. Mettre a jour la cle biometrique si elle existe.
+    // On re-wrap en mode faible (pas de BiometricPrompt surprise pendant un
+    // changement de MDP). Le re-upgrade strong se fera automatiquement au
+    // prochain login MDP sur un appareil Class 3.
     final biometryEnabled = await _secureStorage.isBiometryEnabled();
     if (biometryEnabled) {
       try {
         await _secureStorage.saveHardwareWrappedSessionKey(newKey);
-      } catch (_) {
-        await _secureStorage.saveWrappedKey(
-          jsonEncode({
-            'key': base64Encode(newKey),
-            'iterations': _currentKeyIterations,
-          }),
-        );
+        await _secureStorage.setBiometricMode('weak');
+      } catch (e) {
+        _log('AuthService - Echec re-wrap biometrique apres changement MDP: $e');
+        await _secureStorage.setBiometryEnabled(false);
       }
     }
     

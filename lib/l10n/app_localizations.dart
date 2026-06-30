@@ -112,17 +112,47 @@ abstract class AppLocalizations {
   /// **'Settings'**
   String get settings;
 
+  /// No description provided for @settingsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a section to easily manage your application.'**
+  String get settingsSubtitle;
+
   /// No description provided for @security.
   ///
   /// In en, this message translates to:
   /// **'Security'**
   String get security;
 
+  /// No description provided for @appearance.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get appearance;
+
   /// No description provided for @premium.
   ///
   /// In en, this message translates to:
   /// **'Premium'**
   String get premium;
+
+  /// No description provided for @backupAndSync.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup & Synchronization'**
+  String get backupAndSync;
+
+  /// No description provided for @keyboardShortcuts.
+  ///
+  /// In en, this message translates to:
+  /// **'Keyboard shortcuts'**
+  String get keyboardShortcuts;
+
+  /// No description provided for @aboutAndSupport.
+  ///
+  /// In en, this message translates to:
+  /// **'About & Support'**
+  String get aboutAndSupport;
 
   /// No description provided for @organization.
   ///
@@ -259,13 +289,13 @@ abstract class AppLocalizations {
   /// No description provided for @aboutPremium.
   ///
   /// In en, this message translates to:
-  /// **'PassKeyra v1.1.0 (Premium activated)'**
+  /// **'PassKeyra v1.1.11 (Premium activated)'**
   String get aboutPremium;
 
   /// No description provided for @aboutFree.
   ///
   /// In en, this message translates to:
-  /// **'PassKeyra v1.1.0'**
+  /// **'PassKeyra v1.1.11'**
   String get aboutFree;
 
   /// No description provided for @biometricMigrationTitle.
@@ -597,6 +627,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Biometry could not be activated.'**
   String get biometryNotActivated;
+
+  /// No description provided for @weakBiometricWarningTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Limited biometric protection on this device'**
+  String get weakBiometricWarningTitle;
+
+  /// No description provided for @weakBiometricWarningMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This device does not support strong biometrics. Biometric unlock is more convenient, but less secure than your master password: someone with access to your phone could potentially bypass it.\n\nYour vault remains encrypted with your master password.\n\nEnable biometric unlock anyway?'**
+  String get weakBiometricWarningMessage;
+
+  /// No description provided for @weakBiometricWarningActivateAnyway.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable anyway'**
+  String get weakBiometricWarningActivateAnyway;
+
+  /// No description provided for @weakBiometricWarningKeepPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep master password'**
+  String get weakBiometricWarningKeepPassword;
+
+  /// No description provided for @biometricReEnrollmentTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Fingerprint changed'**
+  String get biometricReEnrollmentTitle;
+
+  /// No description provided for @biometricReEnrollmentMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'For your security, changes to your fingerprints have disabled biometric unlock. Enter your master password once to re-enable it.'**
+  String get biometricReEnrollmentMessage;
+
+  /// No description provided for @biometricReEnrollmentButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter my master password'**
+  String get biometricReEnrollmentButton;
+
+  /// No description provided for @biometricUpgraded.
+  ///
+  /// In en, this message translates to:
+  /// **'Biometric protection upgraded'**
+  String get biometricUpgraded;
+
+  /// No description provided for @biometricAuthSubtitleStrong.
+  ///
+  /// In en, this message translates to:
+  /// **'Enhanced protection (hardware-bound)'**
+  String get biometricAuthSubtitleStrong;
+
+  /// No description provided for @biometricAuthSubtitleWeak.
+  ///
+  /// In en, this message translates to:
+  /// **'Standard protection'**
+  String get biometricAuthSubtitleWeak;
+
+  /// No description provided for @selectAnEntry.
+  ///
+  /// In en, this message translates to:
+  /// **'Select an entry'**
+  String get selectAnEntry;
+
+  /// No description provided for @selectAnEntryHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Click an entry to view its details'**
+  String get selectAnEntryHint;
 
   /// No description provided for @connectionProblem.
   ///
@@ -2877,12 +2979,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Quick and secure unlocking with fingerprint or face recognition.'**
   String get onboardingBiometryMessage;
-
-  /// No description provided for @onboardingClickHere.
-  ///
-  /// In en, this message translates to:
-  /// **'Please click on the highlighted element'**
-  String get onboardingClickHere;
 
   /// No description provided for @onboardingCompleteMessage.
   ///

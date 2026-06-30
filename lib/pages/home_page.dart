@@ -1,6 +1,7 @@
 ﻿import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -24,15 +25,24 @@ import '../services/category_service.dart';
 import '../services/onboarding_service.dart';
 import '../services/review_service.dart';
 import '../services/premium_service.dart';
+import '../services/screen_blur_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'cloud_backup_page.dart';
 import 'edit_entry_page.dart';
 import 'view_entry_page.dart';
+import '../widgets/desktop/compact_entry_list_item.dart';
+import '../widgets/desktop/entry_detail_panel.dart';
 import 'settings_page.dart';
+import 'settings_security_page.dart';
+import 'settings_appearance_page.dart';
+import 'settings_backup_sync_page.dart';
+import 'settings_about_support_page.dart';
 import 'import_export_page.dart';
 import 'login_page.dart';
 import 'premium_page.dart';
 import '../app/app.dart';
 import '../app/page_actions.dart';
+import '../services/firebase/rest/cloud_debug_log.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -88,12 +98,62 @@ class _HomePageState extends State<HomePage>
   List<PasswordEntry> _filtered = <PasswordEntry>[];
   String _sort = 'date_desc';
   String? _selectedCategory; // null = toutes les catégories
+  PasswordEntry? _selectedEntry; // desktop : entree affichee dans le panel droit
   BannerAd? _bannerAd;
   bool _isBannerAdLoaded = false;
   List<CustomCategory> _categories = [];
+
+  // Easter egg debug : 7 taps rapides sur le logo PassKeyra (AppBar)
+  // bascule Premium + FLAG_SECURE en une seule action.
+  // Flag `_debugEasterEggEnabled` : passer a `false` avant tout build AAB
+  // Play Store (revenue leak + posture securite).
+  static const bool _debugEasterEggEnabled = false;
+  static const int _easterEggTapThreshold = 7;
+  static const Duration _easterEggResetDelay = Duration(seconds: 3);
+  int _logoTapCount = 0;
+  DateTime? _lastLogoTapAt;
+
+  Future<void> _handleLogoTap() async {
+    if (!_debugEasterEggEnabled) return;
+    final now = DateTime.now();
+    if (_lastLogoTapAt != null &&
+        now.difference(_lastLogoTapAt!) > _easterEggResetDelay) {
+      _logoTapCount = 0;
+    }
+    _logoTapCount++;
+    _lastLogoTapAt = now;
+
+    if (_logoTapCount >= _easterEggTapThreshold) {
+      _logoTapCount = 0;
+      _lastLogoTapAt = null;
+      // Toggle Premium
+      final newPremium = await PremiumService().togglePremiumDebug();
+      // Toggle FLAG_SECURE
+      final blur = ScreenBlurService.instance;
+      await blur.setEnabled(!blur.isEnabled);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newPremium
+                ? 'Debug : Premium ON, FLAG_SECURE ${blur.isEnabled ? "ON" : "OFF"}'
+                : 'Debug : Premium OFF, FLAG_SECURE ${blur.isEnabled ? "ON" : "OFF"}',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   final GlobalKey _searchBarKey = GlobalKey();
   final GlobalKey _sortButtonKey = GlobalKey();
   final GlobalKey _categoryChipsKey = GlobalKey();
+  // Cles stables par categorie (id -> GlobalKey), pour que le positionnement
+  // des popups de sous-categories reste valide meme apres un rebuild pendant
+  // que le menu est ouvert (une GlobalKey() recreee a chaque build() perdrait
+  // son currentContext et casserait le drill-down).
+  final Map<String, GlobalKey> _categoryChipKeys = {};
+  final ScrollController _categoryChipsScrollController = ScrollController();
   final GlobalKey _settingsButtonKey = GlobalKey();
   final GlobalKey _addButtonKey = GlobalKey();
   final GlobalKey _copyAllButtonKey      = GlobalKey();
@@ -612,7 +672,7 @@ class _HomePageState extends State<HomePage>
     final entry = _all.isNotEmpty ? _all.first : null;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => EditEntryPage(entry: entry, startTutorial: true),
+        builder: (_) => EditEntryPage(entry: entry, startTutorial: true, existingUsernames: _all.map((e) => e.username).toList()),
       ),
     );
 
@@ -1156,6 +1216,7 @@ class _HomePageState extends State<HomePage>
     _categoryService.removeListener(_loadCategories);
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _categoryChipsScrollController.dispose();
     // Libérer les actions du bus global (les autres pages n'en ont pas besoin).
     if (HomePageActions.instance.newEntry.value == _checkLimitAndAdd) {
       HomePageActions.instance.newEntry.value = null;
@@ -1173,6 +1234,7 @@ class _HomePageState extends State<HomePage>
   // (Windows V1 sans Firebase). La sauvegarde locale est toujours faite.
   Future<void> _persistAll() async {
     final sync = _syncCoordinator;
+    cloudLog('HomePage._persistAll : syncCoordinator=${sync != null ? "present" : "NULL"} entries=${_all.length}');
     if (sync != null) {
       await sync.saveAll(_all);
     } else {
@@ -1247,6 +1309,10 @@ class _HomePageState extends State<HomePage>
         list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     }
 
+    if (_selectedEntry != null) {
+      final refreshed = list.where((e) => e.id == _selectedEntry!.id).firstOrNull;
+      _selectedEntry = refreshed;
+    }
     setState(() => _filtered = list);
   }
 
@@ -1256,12 +1322,14 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _viewEntry(PasswordEntry entry) async {
-    // Ouvrir la page de visualisation (lecture seule)
+    if (isDesktop) {
+      setState(() => _selectedEntry = entry);
+      return;
+    }
     final result = await Navigator.of(context).push<PasswordEntry>(
       MaterialPageRoute(builder: (_) => ViewEntryPage(entry: entry)),
     );
     if (result != null) {
-      // upsert si modifié
       final idx = _all.indexWhere((e) => e.id == result.id);
       if (idx >= 0) {
         _all[idx] = result;
@@ -1273,7 +1341,7 @@ class _HomePageState extends State<HomePage>
   
   Future<void> _addOrEdit([PasswordEntry? entry]) async {
     final result = await Navigator.of(context).push<PasswordEntry>(
-      MaterialPageRoute(builder: (_) => EditEntryPage(entry: entry)),
+      MaterialPageRoute(builder: (_) => EditEntryPage(entry: entry, existingUsernames: _all.map((e) => e.username).toList())),
     );
     if (result != null) {
       // upsert
@@ -1284,10 +1352,13 @@ class _HomePageState extends State<HomePage>
       } else {
         _all.add(result);
       }
+      if (_selectedEntry != null && result.id == _selectedEntry!.id) {
+        _selectedEntry = result;
+      }
       await _persistAll();
       _applyFilters();
 
-      // Si c'est une nouvelle entrée, incrémenter le compteur et vérifier si on doit demander un avis
+      // Si c'est une nouvelle entree, incrementer le compteur et vérifier si on doit demander un avis
       if (isNewEntry) {
         await ReviewService().incrementPasswordCount();
         // Vérifier et demander un avis si les conditions sont remplies
@@ -1455,6 +1526,9 @@ class _HomePageState extends State<HomePage>
     confirmController.dispose();
     
     if (confirmed == true) {
+      if (_selectedEntry?.id == entry.id) {
+        _selectedEntry = null;
+      }
       await _persistDelete(entry.id);
       _all.removeWhere((e) => e.id == entry.id);
       _applyFilters();
@@ -1542,11 +1616,509 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Desktop : menu deroulant Parametres (remplace la page intermediaire)
+  // ---------------------------------------------------------------------------
+
+  Future<void> _showDesktopSettingsMenu(GlobalKey buttonKey) async {
+    final l10n = AppLocalizations.of(context)!;
+    final renderBox = buttonKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final buttonPosition = renderBox.localToGlobal(Offset.zero, ancestor: overlay);
+    final position = RelativeRect.fromLTRB(
+      buttonPosition.dx,
+      buttonPosition.dy + renderBox.size.height,
+      overlay.size.width - buttonPosition.dx - renderBox.size.width,
+      0,
+    );
+
+    final selected = await showMenu<String>(
+      context: context,
+      position: position,
+      items: [
+        PopupMenuItem(value: 'security', child: Row(
+          children: [const Icon(Icons.shield_outlined, size: 18), const SizedBox(width: 10), Text(l10n.security)],
+        )),
+        PopupMenuItem(value: 'appearance', child: Row(
+          children: [const Icon(Icons.palette_outlined, size: 18), const SizedBox(width: 10), Text(l10n.appearance)],
+        )),
+        PopupMenuItem(value: 'backup', child: Row(
+          children: [const Icon(Icons.cloud_sync_outlined, size: 18), const SizedBox(width: 10), Text(l10n.backupAndSync)],
+        )),
+        const PopupMenuDivider(),
+        PopupMenuItem(value: 'premium', child: Row(
+          children: [const Icon(Icons.workspace_premium_outlined, size: 18), const SizedBox(width: 10), Text(l10n.premium)],
+        )),
+        PopupMenuItem(value: 'discovery', child: Row(
+          children: [const Icon(Icons.explore_outlined, size: 18), const SizedBox(width: 10), Text(l10n.discoveryModeTitle)],
+        )),
+        PopupMenuItem(value: 'shortcuts', child: Row(
+          children: [const Icon(Icons.keyboard_outlined, size: 18), const SizedBox(width: 10), Text(l10n.keyboardShortcuts)],
+        )),
+        const PopupMenuDivider(),
+        PopupMenuItem(value: 'about', child: Row(
+          children: [const Icon(Icons.info_outline, size: 18), const SizedBox(width: 10), Text(l10n.aboutAndSupport)],
+        )),
+      ],
+    );
+
+    if (selected == null || !mounted) return;
+    switch (selected) {
+      case 'security':
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => SettingsSecurityPage(auth: _authService),
+        ));
+      case 'appearance':
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => const SettingsAppearancePage(),
+        ));
+      case 'backup':
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => SettingsBackupSyncPage(auth: _authService, vaultRepository: _repo),
+        ));
+      case 'premium':
+        await Navigator.pushNamed(context, PremiumPage.route);
+      case 'discovery':
+        await Navigator.pushNamed(context, '/discovery-tutorials',
+          arguments: {'auth': _authService, 'vaultRepository': _repo});
+      case 'shortcuts':
+        await Navigator.pushNamed(context, '/keyboard-shortcuts');
+      case 'about':
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => SettingsAboutSupportPage(isPremium: PremiumService().isPremium),
+        ));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Desktop : menu contextuel clic droit
+  // ---------------------------------------------------------------------------
+
+  Future<void> _showDesktopContextMenu(PasswordEntry entry, Offset globalPosition) async {
+    final l10n = AppLocalizations.of(context)!;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final position = RelativeRect.fromRect(
+      Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
+      Offset.zero & overlay.size,
+    );
+
+    final action = await showMenu<String>(
+      context: context,
+      position: position,
+      items: [
+        PopupMenuItem(value: 'copy_password', child: Row(
+          children: [
+            const Icon(Icons.lock_outline, size: 18),
+            const SizedBox(width: 8),
+            Text(l10n.copyPassword),
+          ],
+        )),
+        PopupMenuItem(value: 'copy_username', child: Row(
+          children: [
+            const Icon(Icons.person_outline, size: 18),
+            const SizedBox(width: 8),
+            Text(l10n.copyUsername),
+          ],
+        )),
+        PopupMenuItem(value: 'copy_all', child: Row(
+          children: [
+            const Icon(Icons.copy_all, size: 18),
+            const SizedBox(width: 8),
+            Text(l10n.copyAllInfo),
+          ],
+        )),
+        const PopupMenuDivider(),
+        if (entry.url != null && entry.url!.isNotEmpty)
+          PopupMenuItem(value: 'open_url', child: Row(
+            children: [
+              const Icon(Icons.open_in_new, size: 18),
+              const SizedBox(width: 8),
+              Text(l10n.url),
+            ],
+          )),
+        PopupMenuItem(value: 'edit', child: Row(
+          children: [
+            const Icon(Icons.edit_outlined, size: 18),
+            const SizedBox(width: 8),
+            Text(l10n.edit),
+          ],
+        )),
+        const PopupMenuDivider(),
+        PopupMenuItem(value: 'delete', child: Row(
+          children: [
+            Icon(Icons.delete_outline, size: 18, color: PassKeyraColors.error),
+            const SizedBox(width: 8),
+            Text(l10n.delete, style: TextStyle(color: PassKeyraColors.error)),
+          ],
+        )),
+      ],
+    );
+
+    if (action == null || !mounted) return;
+    switch (action) {
+      case 'copy_password':
+        await _copyPassword(entry);
+      case 'copy_username':
+        SecureClipboardService.copyWithAutoClear(entry.username);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.usernameCopied)),
+          );
+        }
+      case 'copy_all':
+        await _copyEntryInfo(entry);
+      case 'open_url':
+        if (entry.url != null) {
+          final uri = Uri.parse(entry.url!);
+          if (await canLaunchUrl(uri)) await launchUrl(uri);
+        }
+      case 'edit':
+        await _addOrEdit(entry);
+      case 'delete':
+        await _delete(entry);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Desktop : layout 2 colonnes
+  // ---------------------------------------------------------------------------
+
+  Widget _buildDesktopBody(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
+    return Column(
+      children: [
+        // Puces categories : pleine largeur, au-dessus des deux colonnes.
+        _buildCategoryChips(context),
+        // Barre du "T" : separateur horizontal pleine largeur.
+        Divider(height: 2, thickness: 2, color: PassKeyraColors.border),
+        // Corps : liste (gauche) | separateur vertical | detail (droite).
+        // Le separateur vertical ne part QUE d'ici (pied du T), pas du haut.
+        Expanded(
+          child: Row(
+            children: [
+              // Colonne gauche : liste des entrees
+              Expanded(
+                child: Column(
+                  children: [
+                    // Compteur
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: Row(
+                        children: [
+                          Text(
+                            '${_filtered.length} ${_filtered.length <= 1 ? l10n.entry : l10n.entries}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: PassKeyraColors.textTertiary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Liste compacte
+                    Expanded(
+                      child: _filtered.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.lock_outline, size: 48, color: PassKeyraColors.textSubtle),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    l10n.noEntries,
+                                    style: const TextStyle(color: PassKeyraColors.textTertiary),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : ListView.builder(
+                              itemCount: _filtered.length,
+                              itemBuilder: (_, i) {
+                                final e = _filtered[i];
+                                return CompactEntryListItem(
+                                  key: i == 0 ? _firstEntryCardKey : ValueKey(e.id),
+                                  entry: e,
+                                  isSelected: _selectedEntry?.id == e.id,
+                                  onTap: () => setState(() => _selectedEntry = e),
+                                  onDoubleTap: () => _addOrEdit(e),
+                                  onSecondaryTapDown: (details) =>
+                                      _showDesktopContextMenu(e, details.globalPosition),
+                                  categoryColor: getCategoryColor(e.category),
+                                  categoryIcon: getCategoryIcon(e.category),
+                                  categoryEmoji: categoryHasEmoji(e.category)
+                                      ? getCategoryEmoji(e.category)
+                                      : null,
+                                );
+                              },
+                            ),
+                    ),
+                    // Bouton nouvelle entree (remplace le FAB)
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          key: _addButtonKey,
+                          onPressed: () => _checkLimitAndAdd(),
+                          icon: const Icon(Icons.add, size: 18),
+                          label: Text(l10n.add),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Separateur vertical (pied du T)
+              VerticalDivider(width: 2, thickness: 2, color: PassKeyraColors.border),
+              // Colonne droite : detail
+              SizedBox(
+                width: 390,
+                child: _selectedEntry == null
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.touch_app_outlined, size: 48, color: PassKeyraColors.textSubtle),
+                            const SizedBox(height: 12),
+                            Text(
+                              l10n.selectAnEntry,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: PassKeyraColors.textTertiary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              l10n.selectAnEntryHint,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: PassKeyraColors.textSubtle,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : EntryDetailPanel(
+                        key: ValueKey(_selectedEntry!.id),
+                        entry: _selectedEntry!,
+                        onEdit: () => _addOrEdit(_selectedEntry),
+                        onDelete: () => _delete(_selectedEntry!),
+                        onClose: () => setState(() => _selectedEntry = null),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCategoryChips(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
+    // Trouver la sous-categorie selectionnee et sa racine (peu importe la profondeur)
+    CustomCategory? selectedSubCat;
+    CustomCategory? selectedRootAncestor;
+    if (_selectedCategory != null) {
+      final cat = _categories.where((c) => c.name == _selectedCategory).firstOrNull;
+      if (cat != null && !cat.isRoot) {
+        selectedSubCat = cat;
+        CustomCategory? current = cat;
+        while (current != null && !current.isRoot) {
+          current = _categories.where((c) => c.id == current!.parentId).firstOrNull;
+        }
+        selectedRootAncestor = current;
+      }
+    }
+
+    return SizedBox(
+      height: selectedSubCat != null ? 72 : 48,
+      child: Listener(
+        onPointerSignal: (event) {
+          if (event is PointerScrollEvent) {
+            final newOffset = (_categoryChipsScrollController.offset + event.scrollDelta.dy)
+                .clamp(0.0, _categoryChipsScrollController.position.maxScrollExtent);
+            _categoryChipsScrollController.jumpTo(newOffset);
+          }
+        },
+        child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: ListView(
+        key: _categoryChipsKey,
+        controller: _categoryChipsScrollController,
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: ChoiceChip(
+              label: Text(l10n.all),
+              selected: _selectedCategory == null,
+              onSelected: (_) {
+                setState(() => _selectedCategory = null);
+                _applyFilters();
+              },
+            ),
+          ),
+          ..._categories.where((c) => c.isRoot).map((cat) {
+            final isSelected = _selectedCategory == cat.name;
+            final children = _categoryService.getChildren(cat.id);
+            final hasChildren = children.isNotEmpty;
+            final hasSelectedChild = selectedRootAncestor?.id == cat.id;
+
+            final chipKey = _categoryChipKeys.putIfAbsent(cat.id, () => GlobalKey());
+            return Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ChoiceChip(
+                    key: chipKey,
+                    avatar: cat.emoji != null
+                        ? Text(cat.emoji!, style: const TextStyle(fontSize: 14))
+                        : Icon(cat.icon, size: 16, color: (isSelected || hasSelectedChild) ? null : cat.color),
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(cat.name),
+                        if (hasChildren) ...[
+                          const SizedBox(width: 2),
+                          Icon(Icons.arrow_drop_down, size: 18,
+                            color: (isSelected || hasSelectedChild) ? null : PassKeyraColors.textSecondary),
+                        ],
+                      ],
+                    ),
+                    selected: isSelected || hasSelectedChild,
+                    onSelected: (_) {
+                      if (hasChildren) {
+                        _showSubCategoryMenu(chipKey, cat, children);
+                      } else {
+                        setState(() => _selectedCategory = isSelected ? null : cat.name);
+                        _applyFilters();
+                      }
+                    },
+                  ),
+                  if (hasSelectedChild && selectedSubCat != null)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8, top: 2),
+                      child: InkWell(
+                        onTap: () {
+                          setState(() => _selectedCategory = null);
+                          _applyFilters();
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: cat.color.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (selectedSubCat.emoji != null)
+                                Text(selectedSubCat.emoji!, style: const TextStyle(fontSize: 10))
+                              else
+                                Icon(selectedSubCat.icon, size: 10, color: cat.color),
+                              const SizedBox(width: 4),
+                              Text(
+                                selectedSubCat.name,
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cat.color),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(Icons.close, size: 12, color: cat.color),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }),
+        ],
+        ),
+        ),
+      ),
+    );
+  }
+
+  /// Affiche le menu d'un niveau de categories (sous-categories OU
+  /// sous-sous-categories). Un item ayant lui-meme des enfants n'est PAS
+  /// deplie automatiquement : il affiche juste une fleche, et le clic ouvre
+  /// un nouveau menu pour ce niveau (drill-down), au lieu de tout aplatir.
+  void _showSubCategoryMenu(
+    GlobalKey chipKey,
+    CustomCategory parent,
+    List<CustomCategory> children,
+  ) async {
+    final renderBox = chipKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final chipPosition = renderBox.localToGlobal(Offset.zero, ancestor: overlay);
+    final position = RelativeRect.fromLTRB(
+      chipPosition.dx,
+      chipPosition.dy + renderBox.size.height,
+      overlay.size.width - chipPosition.dx - renderBox.size.width,
+      0,
+    );
+
+    final rootColor = parent.color;
+    final selectedId = await showMenu<String>(
+      context: context,
+      position: position,
+      items: children.map((cat) {
+        final isCatSelected = _selectedCategory == cat.name;
+        final hasOwnChildren = _categoryService.hasChildren(cat.id);
+        return PopupMenuItem(
+          value: cat.id,
+          child: Row(
+            children: [
+              if (cat.emoji != null)
+                Text(cat.emoji!, style: const TextStyle(fontSize: 14))
+              else
+                Icon(cat.icon, size: 14, color: rootColor),
+              const SizedBox(width: 8),
+              Text(
+                cat.name,
+                style: TextStyle(
+                  fontWeight: isCatSelected ? FontWeight.w700 : FontWeight.normal,
+                  color: isCatSelected ? rootColor : null,
+                ),
+              ),
+              if (hasOwnChildren) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.arrow_right, size: 18, color: PassKeyraColors.textTertiary),
+              ],
+            ],
+          ),
+        );
+      }).toList(),
+    );
+
+    if (selectedId == null) return;
+
+    final selectedCat = children.where((c) => c.id == selectedId).firstOrNull;
+    if (selectedCat == null) return;
+
+    if (_categoryService.hasChildren(selectedCat.id)) {
+      // Drill-down : ouvrir le niveau suivant au lieu de filtrer.
+      _showSubCategoryMenu(chipKey, selectedCat, _categoryService.getChildren(selectedCat.id));
+      return;
+    }
+
+    setState(() => _selectedCategory = _selectedCategory == selectedCat.name ? null : selectedCat.name);
+    _applyFilters();
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Guard : tant que didChangeDependencies n'a pas peuplé _authService /
-    // _syncCoordinator, on affiche un loader. Évite LateInitializationError
-    // au premier paint sur desktop.
+    // Guard : tant que didChangeDependencies n'a pas peuple _authService /
+    // _syncCoordinator, on affiche un loader.
     if (!_authReady) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
@@ -1561,15 +2133,17 @@ class _HomePageState extends State<HomePage>
         appBar: AppBar(
         title: Row(
           children: [
-            Image.asset(
-              'assets/icons/PassKeyra_centered.png',
-              width: 32,
-              height: 32,
-              // Pré-rastérise l'asset 1024×1024 à 96px (3× la taille affichée)
-              // pour rester net sur DPI 125-200 % de Windows.
-              cacheWidth: 96,
-              cacheHeight: 96,
-              filterQuality: FilterQuality.medium,
+            GestureDetector(
+              onTap: _handleLogoTap,
+              behavior: HitTestBehavior.opaque,
+              child: Image.asset(
+                'assets/icons/PassKeyra_centered.png',
+                width: 32,
+                height: 32,
+                cacheWidth: 96,
+                cacheHeight: 96,
+                filterQuality: FilterQuality.medium,
+              ),
             ),
             const SizedBox(width: 8),
             const Text(
@@ -1773,6 +2347,36 @@ class _HomePageState extends State<HomePage>
               tooltip: AppLocalizations.of(context)!.premiumOnlyTooltip,
               onPressed: () => Navigator.pushNamed(context, PremiumPage.route),
             ),
+          // Bouton sync manuelle (desktop) : force un pull depuis le cloud
+          // puis recharge les entries. Remplace le pull-to-refresh du mobile
+          // qui n'est pas un geste naturel au clic souris.
+          if (isDesktop && _syncCoordinator != null)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Synchroniser',
+              onPressed: () async {
+                try {
+                  await _handlePullToRefresh();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Synchronisation terminee'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Erreur : $e'),
+                        backgroundColor: PassKeyraColors.error,
+                      ),
+                    );
+                  }
+                }
+              },
+            ),
           Container(
             key: _sortButtonKey,
             child: _buildCoachHalo(
@@ -1804,6 +2408,10 @@ class _HomePageState extends State<HomePage>
               child: const Icon(Icons.settings_outlined),
             ),
             onPressed: () async {
+              if (isDesktop) {
+                await _showDesktopSettingsMenu(_settingsButtonKey);
+                return;
+              }
               final result = await Navigator.pushNamed(
                 context,
                 SettingsPage.route,
@@ -1816,7 +2424,7 @@ class _HomePageState extends State<HomePage>
           ),
         ],
       ),
-      body: Column(
+      body: isDesktop ? _buildDesktopBody(context) : Column(
         children: [
           // Barre de recherche
           Padding(
@@ -2194,7 +2802,7 @@ class _HomePageState extends State<HomePage>
           ),
         ],
       ),
-      floatingActionButton: Container(
+      floatingActionButton: isDesktop ? null : Container(
         child: _buildCoachHalo(
           target: _CoachTarget.add,
           shape: BoxShape.circle,

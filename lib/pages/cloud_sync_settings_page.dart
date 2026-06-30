@@ -113,12 +113,6 @@ class _CloudSyncSettingsPageState extends State<CloudSyncSettingsPage>
       message: l10n.premiumTutorialCloudSyncMessage,
       primaryLabel: l10n.onboardingNext,
       secondaryLabel: l10n.onboardingSkipTutorial,
-      onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(l10n.onboardingClickHere),
-          duration: const Duration(seconds: 2),
-        ),
-      ),
       stepIndicator: '1 / 1',
     );
 

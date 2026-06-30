@@ -15,10 +15,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settings => 'Settings';
 
   @override
+  String get settingsSubtitle =>
+      'Choose a section to easily manage your application.';
+
+  @override
   String get security => 'Security';
 
   @override
+  String get appearance => 'Appearance';
+
+  @override
   String get premium => 'Premium';
+
+  @override
+  String get backupAndSync => 'Backup & Synchronization';
+
+  @override
+  String get keyboardShortcuts => 'Keyboard shortcuts';
+
+  @override
+  String get aboutAndSupport => 'About & Support';
 
   @override
   String get organization => 'Organization';
@@ -87,10 +103,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get about => 'About';
 
   @override
-  String get aboutPremium => 'PassKeyra v1.1.0 (Premium activated)';
+  String get aboutPremium => 'PassKeyra v1.1.11 (Premium activated)';
 
   @override
-  String get aboutFree => 'PassKeyra v1.1.0';
+  String get aboutFree => 'PassKeyra v1.1.11';
 
   @override
   String get biometricMigrationTitle => 'Enhanced security';
@@ -280,6 +296,46 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get biometryNotActivated => 'Biometry could not be activated.';
+
+  @override
+  String get weakBiometricWarningTitle =>
+      'Limited biometric protection on this device';
+
+  @override
+  String get weakBiometricWarningMessage =>
+      'This device does not support strong biometrics. Biometric unlock is more convenient, but less secure than your master password: someone with access to your phone could potentially bypass it.\n\nYour vault remains encrypted with your master password.\n\nEnable biometric unlock anyway?';
+
+  @override
+  String get weakBiometricWarningActivateAnyway => 'Enable anyway';
+
+  @override
+  String get weakBiometricWarningKeepPassword => 'Keep master password';
+
+  @override
+  String get biometricReEnrollmentTitle => 'Fingerprint changed';
+
+  @override
+  String get biometricReEnrollmentMessage =>
+      'For your security, changes to your fingerprints have disabled biometric unlock. Enter your master password once to re-enable it.';
+
+  @override
+  String get biometricReEnrollmentButton => 'Enter my master password';
+
+  @override
+  String get biometricUpgraded => 'Biometric protection upgraded';
+
+  @override
+  String get biometricAuthSubtitleStrong =>
+      'Enhanced protection (hardware-bound)';
+
+  @override
+  String get biometricAuthSubtitleWeak => 'Standard protection';
+
+  @override
+  String get selectAnEntry => 'Select an entry';
+
+  @override
+  String get selectAnEntryHint => 'Click an entry to view its details';
 
   @override
   String get connectionProblem => 'Connection Problem?';
@@ -1552,9 +1608,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get onboardingBiometryMessage =>
       'Quick and secure unlocking with fingerprint or face recognition.';
-
-  @override
-  String get onboardingClickHere => 'Please click on the highlighted element';
 
   @override
   String get onboardingCompleteMessage =>

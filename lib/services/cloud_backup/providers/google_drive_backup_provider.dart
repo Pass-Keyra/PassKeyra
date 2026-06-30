@@ -5,12 +5,16 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:googleapis_auth/auth_io.dart' as gauth;
 import 'package:http/http.dart' as http;
+import '../../../platform/platform_capabilities.dart';
 import '../cloud_backup_provider.dart';
 import '../models/cloud_backup_metadata.dart';
 import '../../../models/backup_payload.dart';
 import '../../secure_storage_service.dart';
 import '../../google_signin_service.dart';
+import '../../firebase/google_signin_windows.dart';
+import '../../firebase/rest/cloud_debug_log.dart';
 
 /// Implémentation du provider de backup pour Google Drive
 ///
@@ -56,60 +60,54 @@ class GoogleDriveBackupProvider implements CloudBackupProvider {
   @override
   Color get providerColor => const Color(0xFF4285F4); // Bleu Google
 
+  // Desktop : instance du flow OAuth Windows pour Google Drive.
+  final _googleSignInWindows = GoogleSignInWindows();
+
   @override
   Future<bool> isAuthenticated() async {
     try {
-      // CRITIQUE: Si l'API Drive est déjà initialisée, on est authentifié
-      // Cela évite d'appeler restoreSession() à chaque vérification
-      if (_driveApi != null) {
-        return true;
+      if (_driveApi != null) return true;
+
+      // Desktop : tenter de restaurer la session OAuth Windows.
+      if (isDesktop) {
+        final result = await _googleSignInWindows.restoreSession();
+        if (result != null && result.accessToken.isNotEmpty) {
+          _initializeDriveApiFromAccessToken(result.accessToken);
+          cloudLog('Drive isAuthenticated : session restauree OK');
+          return true;
+        }
+        cloudLog('Drive isAuthenticated : pas de session a restaurer');
+        return false;
       }
 
-      // Étape 1 : Essayer getCurrentAccount() (méthode silencieuse, pas de popup)
+      // Mobile : flow existant via GoogleSignInService.
       _log('GoogleDriveBackupProvider - Vérification silencieuse session Google...');
       GoogleSignInAccount? currentAccount = await GoogleSignInService.instance.getCurrentAccount();
 
       if (currentAccount != null) {
-        // Compte trouvé via getCurrentAccount(), initialiser Drive API
         _log('GoogleDriveBackupProvider - Compte trouvé: ${currentAccount.email}');
         await _initializeDriveApi(currentAccount);
         return true;
       }
 
-      // Étape 2 : getCurrentAccount() retourne null
-      // Vérifier si Firebase Auth a une session active
       final firebaseAuth = FirebaseAuth.instance;
       if (firebaseAuth.currentUser != null) {
-        // Firebase connecté MAIS Google Sign-In n'a pas de session parallèle
-        // Cas typique : Firebase a restauré sa session, mais Google Sign-In non
-        _log('GoogleDriveBackupProvider - Firebase connecté (${firebaseAuth.currentUser!.email}), tentative restauration Google...');
-
+        _log('GoogleDriveBackupProvider - Firebase connecté, tentative restauration Google...');
         try {
-          // Essayer restoreSession() pour réactiver la session Google
-          // ATTENTION : Peut déclencher un popup sur certains appareils si session expirée
           currentAccount = await GoogleSignInService.instance.restoreSession();
-
           if (currentAccount != null) {
-            _log('GoogleDriveBackupProvider - Session Google restaurée: ${currentAccount.email}');
             await _initializeDriveApi(currentAccount);
             return true;
           }
         } catch (e) {
-          // restoreSession() peut échouer ou déclencher un popup (selon appareil)
-          _log('GoogleDriveBackupProvider - Impossible de restaurer session Google depuis Firebase: $e');
-          // Ne pas propager l'erreur, on retournera false
+          _log('GoogleDriveBackupProvider - Impossible de restaurer session Google: $e');
         }
       }
 
-      // Aucune session Google disponible (ni Sign-In direct, ni via Firebase)
-      _log('GoogleDriveBackupProvider - Aucune session Google disponible, authentification manuelle nécessaire');
+      _log('GoogleDriveBackupProvider - Aucune session Google disponible');
       return false;
-
     } catch (e) {
       _log('GoogleDriveBackupProvider - isAuthenticated error: $e');
-
-      // Si l'API Drive est déjà initialisée, on est probablement toujours authentifié
-      // L'erreur peut être temporaire (réseau, charge système, etc.)
       return _driveApi != null;
     }
   }
@@ -117,30 +115,37 @@ class GoogleDriveBackupProvider implements CloudBackupProvider {
   @override
   Future<bool> authenticate() async {
     try {
-      // L'utilisateur est authentifié via GoogleSignInService (partagé avec Firebase)
-      // Les scopes Drive sont déjà configurés dans GoogleSignInService
-      _log('GoogleDriveBackupProvider - Checking Google Sign-In status...');
+      // Desktop : OAuth web flow via navigateur (callback localhost).
+      if (isDesktop) {
+        _log('GoogleDriveBackupProvider - Starting Windows OAuth...');
+        cloudLog('Drive authenticate (desktop) DEBUT');
+        final result = await _googleSignInWindows.signIn();
+        if (result == null) {
+          _log('GoogleDriveBackupProvider - Authentication cancelled');
+          cloudLog('Drive authenticate : GoogleSignIn retourne null');
+          return false;
+        }
+        _initializeDriveApiFromAccessToken(result.accessToken);
+        await _storage.saveGoogleDriveEmail(result.email);
+        _log('GoogleDriveBackupProvider - Authenticated (Windows) as ${result.email}');
+        cloudLog('Drive authenticate SUCCES email=${result.email}');
+        return true;
+      }
 
-      // Vérifier si l'utilisateur est déjà connecté (via Firebase ou précédente connexion)
+      // Mobile : flow existant via GoogleSignInService.
+      _log('GoogleDriveBackupProvider - Checking Google Sign-In status...');
       GoogleSignInAccount? account = await GoogleSignInService.instance.getCurrentAccount();
 
       if (account == null) {
-        // Pas encore connecté, demander connexion
         _log('GoogleDriveBackupProvider - Starting Google Sign-In...');
         account = await GoogleSignInService.instance.signIn();
-
         if (account == null) {
-          // Utilisateur a annulé l'authentification
           _log('GoogleDriveBackupProvider - Authentication cancelled by user');
           return false;
         }
       }
 
-      // Initialiser l'API Drive avec le compte
-      // Les scopes Drive sont déjà accordés car configurés dans GoogleSignInService
       await _initializeDriveApi(account);
-
-      // Sauvegarder l'email du compte
       await _storage.saveGoogleDriveEmail(account.email);
 
       _log('GoogleDriveBackupProvider - Authenticated as ${account.email} with Drive scopes');
@@ -472,6 +477,15 @@ class GoogleDriveBackupProvider implements CloudBackupProvider {
 
     final authenticateClient = _GoogleAuthClient(authHeaders);
     _driveApi = drive.DriveApi(authenticateClient);
+  }
+
+  /// Initialise l'API Drive avec un access_token brut (desktop Windows).
+  /// Sur desktop, on n'a pas de `GoogleSignInAccount` mais un token OAuth
+  /// obtenu via `GoogleSignInWindows` (`googleapis_auth`).
+  void _initializeDriveApiFromAccessToken(String accessToken) {
+    _appFolderId = null;
+    final authHeaders = {'Authorization': 'Bearer $accessToken'};
+    _driveApi = drive.DriveApi(_GoogleAuthClient(authHeaders));
   }
 
   /// Trouve le dossier PassKeyra_Backups (retourne null si n'existe pas)

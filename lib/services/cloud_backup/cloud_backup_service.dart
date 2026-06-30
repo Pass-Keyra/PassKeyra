@@ -68,6 +68,19 @@ class CloudBackupService {
     if (lastUploadMillis != null) {
       _lastUploadTime = DateTime.fromMillisecondsSinceEpoch(lastUploadMillis);
     }
+
+    // Desktop : tenter de restaurer silencieusement la session OAuth
+    // (Drive/OneDrive) au demarrage pour que isAuthenticated() retourne true
+    // sans que l'utilisateur doive re-cliquer. Sur mobile, la session Google
+    // est geree par le plugin natif et se restaure automatiquement.
+    if (_currentProvider != null) {
+      try {
+        final isAuth = await _currentProvider!.isAuthenticated();
+        debugPrint('CloudBackupService - Session provider restauree: $isAuth');
+      } catch (e) {
+        debugPrint('CloudBackupService - Erreur restauration session provider: $e');
+      }
+    }
   }
 
   /// Sélectionne et configure un provider cloud

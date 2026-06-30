@@ -7,8 +7,13 @@
   },
 
   "settings": "Settings",
+  "settingsSubtitle": "Choose a section to easily manage your application.",
   "security": "Security",
+  "appearance": "Appearance",
   "premium": "Premium",
+  "backupAndSync": "Backup & Synchronization",
+  "keyboardShortcuts": "Keyboard shortcuts",
+  "aboutAndSupport": "About & Support",
   "organization": "Organization",
   "data": "Data",
   "application": "Application",
@@ -41,8 +46,8 @@
   "localBackupExportSubtitle": "Export your local backup",
 
   "about": "About",
-  "aboutPremium": "PassKeyra v1.1.0 (Premium activated)",
-  "aboutFree": "PassKeyra v1.1.0",
+  "aboutPremium": "PassKeyra v1.1.11 (Premium activated)",
+  "aboutFree": "PassKeyra v1.1.11",
 
   "biometricMigrationTitle": "Enhanced security",
   "biometricMigrationMessage": "PassKeyra has strengthened the biometric protection of your vault. To enable this new protection on your device, you need to enter your master password once. Fingerprint or face unlock will work normally afterwards.",
@@ -120,6 +125,18 @@
   "onboardingBiometryDesktopMessage": "This feature will be available in an upcoming update.",
   "incorrectMasterPasswordBiometryDisabledAfter3Failures": "Incorrect master password. Biometry disabled after 3 failed attempts.",
   "biometryNotActivated": "Biometry could not be activated.",
+  "weakBiometricWarningTitle": "Limited biometric protection on this device",
+  "weakBiometricWarningMessage": "This device does not support strong biometrics. Biometric unlock is more convenient, but less secure than your master password: someone with access to your phone could potentially bypass it.\n\nYour vault remains encrypted with your master password.\n\nEnable biometric unlock anyway?",
+  "weakBiometricWarningActivateAnyway": "Enable anyway",
+  "weakBiometricWarningKeepPassword": "Keep master password",
+  "biometricReEnrollmentTitle": "Fingerprint changed",
+  "biometricReEnrollmentMessage": "For your security, changes to your fingerprints have disabled biometric unlock. Enter your master password once to re-enable it.",
+  "biometricReEnrollmentButton": "Enter my master password",
+  "biometricUpgraded": "Biometric protection upgraded",
+  "biometricAuthSubtitleStrong": "Enhanced protection (hardware-bound)",
+  "biometricAuthSubtitleWeak": "Standard protection",
+  "selectAnEntry": "Select an entry",
+  "selectAnEntryHint": "Click an entry to view its details",
 
   "connectionProblem": "Connection Problem?",
   "helpAndSettings": "Help & Settings",
@@ -598,7 +615,7 @@
   "onboardingLockTimeoutMessage": "The app automatically locks after a period of inactivity to protect data.",
   "onboardingBiometryTitle": "Biometric authentication",
   "onboardingBiometryMessage": "Quick and secure unlocking with fingerprint or face recognition.",
-  "onboardingClickHere": "Please click on the highlighted element",
+
   "onboardingCompleteMessage": "You now know all the essential features of PassKeyra. Enjoy using it!",
 
   "discoveryModeTitle": "Tutorials",

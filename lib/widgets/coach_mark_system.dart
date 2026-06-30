@@ -337,11 +337,9 @@ class _CoachMarkOverlay extends StatelessWidget {
         .toDouble();
 
     return GestureDetector(
-      // Mode interactif : détecter les clics hors cible
       onTap: () {
-        if (onWrongClick != null) {
-          onWrongClick!();
-        }
+        // Tap n'importe ou sur l'overlay = avancer (equivalent au bouton Suivant).
+        Navigator.of(context).pop(true);
       },
       behavior: HitTestBehavior.opaque,
       child: Stack(

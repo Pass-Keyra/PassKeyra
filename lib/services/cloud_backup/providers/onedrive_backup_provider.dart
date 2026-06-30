@@ -6,8 +6,10 @@ import 'package:http/http.dart' as http;
 import '../cloud_backup_provider.dart';
 import '../models/cloud_backup_metadata.dart';
 import '../../../models/backup_payload.dart';
+import '../../../platform/platform_capabilities.dart';
 import '../../secure_storage_service.dart';
 import '../../../app/app.dart' show navigatorKey;
+import 'onedrive_auth_windows.dart';
 
 /// Implémentation du provider de backup pour OneDrive
 ///
@@ -35,8 +37,11 @@ class OneDriveBackupProvider implements CloudBackupProvider {
   // Service de stockage sécurisé pour les tokens
   final SecureStorageService _storage = SecureStorageService();
 
-  // OAuth helper
-  late final AadOAuth _oauth;
+  // OAuth helper (mobile uniquement — WebView indisponible sur desktop).
+  AadOAuth? _oauth;
+
+  // Desktop : flow OAuth manuel PKCE.
+  final _windowsAuth = OneDriveAuthWindows();
 
   // HTTP client avec token d'accès
   http.Client? _httpClient;
@@ -46,17 +51,19 @@ class OneDriveBackupProvider implements CloudBackupProvider {
   String? _appFolderId;
 
   OneDriveBackupProvider() {
-    // Configuration OAuth Azure AD
-    final config = Config(
-      tenant: _tenantId,
-      clientId: _clientId,
-      scope: _scopes.join(' '),
-      redirectUri: _redirectUri,
-      navigatorKey: navigatorKey, // Utiliser le navigatorKey global de l'app
-      webUseRedirect: false, // Utiliser WebView au lieu de redirection
-    );
-
-    _oauth = AadOAuth(config);
+    // `aad_oauth` repose sur un WebView (navigatorKey) → uniquement mobile.
+    // Sur desktop, on utilise `OneDriveAuthWindows` (flow OAuth manuel PKCE).
+    if (!isDesktop) {
+      final config = Config(
+        tenant: _tenantId,
+        clientId: _clientId,
+        scope: _scopes.join(' '),
+        redirectUri: _redirectUri,
+        navigatorKey: navigatorKey,
+        webUseRedirect: false,
+      );
+      _oauth = AadOAuth(config);
+    }
   }
 
   @override
@@ -71,6 +78,18 @@ class OneDriveBackupProvider implements CloudBackupProvider {
   @override
   Future<bool> isAuthenticated() async {
     try {
+      // Desktop : restaurer via le refresh_token persisté (flow PKCE).
+      if (isDesktop) {
+        if (_httpClient != null && _accessToken != null) return true;
+        final token = await _windowsAuth.restoreSession();
+        if (token != null && token.isNotEmpty) {
+          _initializeHttpClient(token);
+          await _storage.saveOneDriveToken(token);
+          return true;
+        }
+        return false;
+      }
+
       // Si le client HTTP est déjà initialisé, on est probablement authentifié
       // Évite les appels API inutiles
       if (_httpClient != null && _accessToken != null) {
@@ -94,7 +113,7 @@ class OneDriveBackupProvider implements CloudBackupProvider {
       // Essayer d'obtenir un token (avec refresh automatique si nécessaire)
       // Le package aad_oauth rafraîchit automatiquement le token avec le refresh token
       try {
-        final token = await _oauth.getAccessToken();
+        final token = await _oauth!.getAccessToken();
 
         if (token != null && token.isNotEmpty) {
           // Token obtenu (peut être un nouveau token rafraîchi)
@@ -133,10 +152,15 @@ class OneDriveBackupProvider implements CloudBackupProvider {
       debugPrint('OneDriveBackupProvider - Starting authentication...');
 
       // Lancer l'authentification OAuth
-      await _oauth.login();
+      final String? token;
+      if (isDesktop) {
+        // Desktop : flow OAuth manuel PKCE (navigateur externe).
+        token = await _windowsAuth.signIn();
+      } else {
+        await _oauth!.login();
+        token = await _oauth!.getAccessToken();
+      }
 
-      // Récupérer le token
-      final token = await _oauth.getAccessToken();
       if (token == null || token.isEmpty) {
         debugPrint('OneDriveBackupProvider - No token received');
         return false;
@@ -181,7 +205,11 @@ class OneDriveBackupProvider implements CloudBackupProvider {
   @override
   Future<void> signOut() async {
     try {
-      await _oauth.logout();
+      if (isDesktop) {
+        await _windowsAuth.signOut();
+      } else {
+        await _oauth!.logout();
+      }
       await _storage.deleteOneDriveToken();
       await _storage.deleteOneDriveEmail();
       _httpClient?.close();

@@ -292,15 +292,10 @@ class _SettingsPageState extends State<SettingsPage>
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
               Text(
-                'Paramètres',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
+                l10n.settingsSubtitle,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Choisissez une rubrique pour gérer votre application simplement.',
-                style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
               CoachMarkSystem.buildHalo(
@@ -309,7 +304,7 @@ class _SettingsPageState extends State<SettingsPage>
                 isActive: _isTutorialRunning && _activeTargetKey == 'security',
                 borderRadius: BorderRadius.circular(12),
                 child: _SectionCard(
-                  title: 'Sécurité',
+                  title: l10n.security,
                   onTap: _openSecurity,
                 ),
               ),
@@ -319,7 +314,7 @@ class _SettingsPageState extends State<SettingsPage>
                 isActive: _isTutorialRunning && _activeTargetKey == 'appearance',
                 borderRadius: BorderRadius.circular(12),
                 child: _SectionCard(
-                  title: 'Apparence',
+                  title: l10n.appearance,
                   onTap: _openAppearance,
                 ),
               ),
@@ -329,12 +324,12 @@ class _SettingsPageState extends State<SettingsPage>
                 isActive: _isTutorialRunning && _activeTargetKey == 'backup',
                 borderRadius: BorderRadius.circular(12),
                 child: _SectionCard(
-                  title: 'Sauvegarde & Synchronisation',
+                  title: l10n.backupAndSync,
                   onTap: _openBackupSync,
                 ),
               ),
               _SectionCard(
-                title: 'Premium',
+                title: l10n.premium,
                 onTap: _openPremium,
               ),
               _SectionCard(
@@ -343,11 +338,11 @@ class _SettingsPageState extends State<SettingsPage>
               ),
               if (isDesktop)
                 _SectionCard(
-                  title: 'Raccourcis clavier',
+                  title: l10n.keyboardShortcuts,
                   onTap: _openKeyboardShortcuts,
                 ),
               _SectionCard(
-                title: 'À propos et support',
+                title: l10n.aboutAndSupport,
                 onTap: _openAboutSupport,
               ),
             ],

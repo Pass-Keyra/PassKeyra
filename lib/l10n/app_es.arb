@@ -7,8 +7,13 @@
   },
 
   "settings": "Configuración",
+  "settingsSubtitle": "Elija una sección para gestionar su aplicación fácilmente.",
   "security": "Seguridad",
+  "appearance": "Apariencia",
   "premium": "Premium",
+  "backupAndSync": "Copia de seguridad y sincronización",
+  "keyboardShortcuts": "Atajos de teclado",
+  "aboutAndSupport": "Acerca de y soporte",
   "organization": "Organización",
   "data": "Datos",
   "application": "Aplicación",
@@ -41,8 +46,8 @@
   "localBackupExportSubtitle": "Exporta tu copia de seguridad local",
 
   "about": "Acerca de",
-  "aboutPremium": "PassKeyra v1.1.0 (Premium activado)",
-  "aboutFree": "PassKeyra v1.1.0",
+  "aboutPremium": "PassKeyra v1.1.11 (Premium activado)",
+  "aboutFree": "PassKeyra v1.1.11",
 
   "biometricMigrationTitle": "Seguridad reforzada",
   "biometricMigrationMessage": "PassKeyra ha reforzado la protección biométrica de tu caja fuerte. Para activar esta nueva protección en tu dispositivo, debes introducir tu contraseña maestra una sola vez. El desbloqueo por huella dactilar o reconocimiento facial funcionará normalmente después.",
@@ -120,6 +125,18 @@
   "onboardingBiometryDesktopMessage": "Esta función estará disponible en una próxima actualización.",
   "incorrectMasterPasswordBiometryDisabledAfter3Failures": "Contraseña maestra incorrecta. La biometría se desactivó tras 3 intentos fallidos.",
   "biometryNotActivated": "No se pudo activar la biometría.",
+  "weakBiometricWarningTitle": "Desbloqueo biométrico menos seguro en este dispositivo",
+  "weakBiometricWarningMessage": "Este dispositivo no cuenta con biometría fuerte. El desbloqueo biométrico es más práctico, pero menos seguro que tu contraseña maestra: una persona con acceso a tu teléfono podría saltárselo.\n\nTu caja fuerte sigue cifrada con tu contraseña maestra.\n\n¿Activar el desbloqueo biométrico de todas formas?",
+  "weakBiometricWarningActivateAnyway": "Activar de todas formas",
+  "weakBiometricWarningKeepPassword": "Mantener contraseña maestra",
+  "biometricReEnrollmentTitle": "Huella modificada",
+  "biometricReEnrollmentMessage": "Por tu seguridad, los cambios en tus huellas han desactivado el desbloqueo biométrico. Introduce tu contraseña maestra una vez para reactivarlo.",
+  "biometricReEnrollmentButton": "Introducir mi contraseña maestra",
+  "biometricUpgraded": "Protección biométrica reforzada",
+  "biometricAuthSubtitleStrong": "Protección reforzada (hardware)",
+  "biometricAuthSubtitleWeak": "Protección estándar",
+  "selectAnEntry": "Seleccione una entrada",
+  "selectAnEntryHint": "Haga clic en una entrada para ver sus detalles",
 
   "connectionProblem": "¿Problema de Conexión?",
   "helpAndSettings": "Ayuda y Configuración",
@@ -598,7 +615,7 @@
   "onboardingLockTimeoutMessage": "La aplicación se bloquea automáticamente después de un período de inactividad para proteger los datos.",
   "onboardingBiometryTitle": "Autenticación biométrica",
   "onboardingBiometryMessage": "Desbloqueo rápido y seguro con huella digital o reconocimiento facial.",
-  "onboardingClickHere": "Por favor, haga clic en el elemento resaltado",
+
   "onboardingCompleteMessage": "¡Ahora conoces todas las funciones esenciales de PassKeyra. ¡Disfrútalo!",
 
   "discoveryModeTitle": "Tutoriales",

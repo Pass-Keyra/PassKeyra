@@ -4,8 +4,13 @@
   "appTitle": "PassKeyra",
 
   "settings": "Paramètres",
+  "settingsSubtitle": "Choisissez une rubrique pour gérer votre application simplement.",
   "security": "Sécurité",
+  "appearance": "Apparence",
   "premium": "Premium",
+  "backupAndSync": "Sauvegarde & Synchronisation",
+  "keyboardShortcuts": "Raccourcis clavier",
+  "aboutAndSupport": "À propos et support",
   "organization": "Organisation",
   "data": "Données",
   "application": "Application",
@@ -35,8 +40,8 @@
   "localBackupExportSubtitle": "Exportez votre sauvegarde locale",
 
   "about": "À propos",
-  "aboutPremium": "PassKeyra v1.1.0 (Premium activé)",
-  "aboutFree": "PassKeyra v1.1.0",
+  "aboutPremium": "PassKeyra v1.1.11 (Premium activé)",
+  "aboutFree": "PassKeyra v1.1.11",
 
   "biometricMigrationTitle": "Sécurité renforcée",
   "biometricMigrationMessage": "PassKeyra a renforcé la protection biométrique de votre coffre. Pour activer cette nouvelle protection sur votre appareil, vous devez ressaisir votre mot de passe maître une seule fois. Le déverrouillage par empreinte digitale ou reconnaissance faciale fonctionnera ensuite normalement.",
@@ -77,6 +82,18 @@
   "incorrectMasterPassword": "Code secret incorrect.",
   "incorrectMasterPasswordBiometryDisabledAfter3Failures": "Code secret incorrect. Biométrie désactivée après 3 tentatives échouées.",
   "biometryNotActivated": "La biométrie n'a pas pu être activée.",
+  "weakBiometricWarningTitle": "Déverrouillage biométrique moins sécurisé sur cet appareil",
+  "weakBiometricWarningMessage": "Cet appareil ne dispose pas d'une biométrie forte. Le déverrouillage biométrique y est plus pratique, mais moins sûr que votre mot de passe maître : une personne ayant accès à votre téléphone pourrait potentiellement le contourner.\n\nVotre coffre reste chiffré par votre mot de passe maître.\n\nActiver quand même le déverrouillage biométrique ?",
+  "weakBiometricWarningActivateAnyway": "Activer quand même",
+  "weakBiometricWarningKeepPassword": "Garder le mot de passe maître",
+  "biometricReEnrollmentTitle": "Empreinte modifiée",
+  "biometricReEnrollmentMessage": "Pour votre sécurité, la modification de vos empreintes a désactivé le déverrouillage biométrique. Saisissez votre mot de passe maître une fois pour le réactiver.",
+  "biometricReEnrollmentButton": "Saisir mon mot de passe maître",
+  "biometricUpgraded": "Protection biométrique renforcée",
+  "biometricAuthSubtitleStrong": "Protection renforcée (matérielle)",
+  "biometricAuthSubtitleWeak": "Protection standard",
+  "selectAnEntry": "Sélectionnez une entrée",
+  "selectAnEntryHint": "Cliquez sur une entrée pour voir ses détails",
   "loginAttemptsRemainingWarning": "Il vous reste {n} tentatives avant le blocage de votre coffre pour 24 heures.",
   "@loginAttemptsRemainingWarning": {
     "placeholders": { "n": { "type": "int" } }
@@ -563,7 +580,7 @@
   "onboardingLockTimeoutMessage": "L'application se verrouille automatiquement après une période d'inactivité pour protéger les données.",
   "onboardingBiometryTitle": "Authentification biométrique",
   "onboardingBiometryMessage": "Déverrouillage rapide et sécurisé avec empreinte digitale ou reconnaissance faciale.",
-  "onboardingClickHere": "Veuillez cliquer sur l'élément en surbrillance",
+
   "onboardingCompleteMessage": "Vous connaissez maintenant toutes les fonctionnalités essentielles de PassKeyra. Bonne utilisation !",
 
   "discoveryModeTitle": "Didacticiel",

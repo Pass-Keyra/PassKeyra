@@ -105,10 +105,8 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     // Configurer la barre d'état avec des icônes sombres (pour fond clair)
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.dark, // Icônes sombres pour fond clair
+        statusBarIconBrightness: Brightness.dark,
         statusBarBrightness: Brightness.light,
-        systemNavigationBarColor: Colors.transparent,
       ),
     );
 
@@ -393,9 +391,14 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
 
       if (ok && _biometryAvailable) {
         try {
-          await _auth.storeWrappedKeyForBiometrics();
+          final l10n = AppLocalizations.of(context)!;
+          await _auth.storeWrappedKeyForBiometrics(
+            promptTitle: l10n.biometricAuth,
+            promptSubtitle: l10n.biometricAuthSubtitle,
+            promptCancel: l10n.cancel,
+          );
         } catch (e) {
-          debugPrint('LoginPage - Échec stockage clé biométrique : $e');
+          debugPrint('LoginPage - Echec stockage cle biometrique : $e');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(AppLocalizations.of(context)!.biometryNotActivated)),
@@ -455,13 +458,25 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       if (ok) {
         await _registerLoginSuccess();
 
-        // Si biométrie activée, régénérer le wrap matériel pour qu'une éventuelle
-        // migration de clé Keystore (hw1: invalidée) ne se répète pas au prochain login.
+        // Si biometrie activee, tenter la migration opportuniste vers strong
+        // (Class 3) ou re-wrap classique sinon.
         if (_biometryAvailable) {
           try {
             final biometryEnabled = await _auth.secureStorage.isBiometryEnabled();
             if (biometryEnabled) {
-              await _auth.storeWrappedKeyForBiometrics();
+              final l10n = AppLocalizations.of(context)!;
+              final migrated = await _auth.opportunisticStrongMigration(
+                promptTitle: l10n.biometricAuth,
+                promptSubtitle: l10n.biometricAuthSubtitleStrong,
+                promptCancel: l10n.cancel,
+              );
+              if (migrated && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(l10n.biometricUpgraded)),
+                );
+              } else if (!migrated) {
+                await _auth.storeWrappedKeyForBiometrics();
+              }
             }
           } catch (e) {
             debugPrint('LoginPage - Echec re-wrap biometrique post-login: $e');
@@ -564,6 +579,25 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: Text(l10n.biometricMigrationButton),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showBiometricReEnrollmentDialog() async {
+    final l10n = AppLocalizations.of(context)!;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.fingerprint, size: 48),
+        title: Text(l10n.biometricReEnrollmentTitle),
+        content: Text(l10n.biometricReEnrollmentMessage),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(l10n.biometricReEnrollmentButton),
           ),
         ],
       ),
@@ -909,46 +943,61 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     }
     
     try {
-      // Auth biométrique au niveau applicatif via local_auth (accepte STRONG,
-      // WEAK et CONVENIENCE → permet face unlock sur tablettes/Pixel).
-      // Une fois authentifié, unlockWithBiometrics() fait juste le unwrap
-      // Keystore sans nouveau prompt.
-      debugPrint('LoginPage - Lancement de local_auth.authenticate()...');
-      final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Authentifiez-vous pour déverrouiller PassKeyra',
-        options: const AuthenticationOptions(
-          biometricOnly: true,
-          stickyAuth: true,
-          sensitiveTransaction: true,
-        ),
-        authMessages: const [
-          AndroidAuthMessages(
-            signInTitle: 'Authentification requise',
-            biometricHint: 'Vérifiez votre identité',
-            cancelButton: 'Annuler',
-            biometricNotRecognized: 'Non reconnu. Réessayez.',
-            goToSettingsButton: 'Paramètres',
-            goToSettingsDescription: 'La biométrie n\'est pas configurée sur cet appareil.',
-            biometricRequiredTitle: 'Biométrie requise',
+      final l10n = AppLocalizations.of(context)!;
+      final mode = await _auth.secureStorage.getWrappedKeyMode();
+      debugPrint('LoginPage - Mode biometrique: $mode');
+
+      bool ok;
+
+      if (mode == 'strong') {
+        // Class 3 : le BiometricPrompt est pilote par le plugin Kotlin
+        // avec CryptoObject. Pas de local_auth.authenticate().
+        debugPrint('LoginPage - Chemin strong, appel unlockWithBiometrics()...');
+        ok = await _auth.unlockWithBiometrics(
+          promptTitle: l10n.biometricAuth,
+          promptSubtitle: l10n.biometricAuthSubtitle,
+          promptCancel: l10n.cancel,
+        );
+      } else {
+        // Class 1/2 : auth applicative via local_auth puis unwrap sans prompt.
+        debugPrint('LoginPage - Chemin weak, lancement local_auth.authenticate()...');
+        final authenticated = await _localAuth.authenticate(
+          localizedReason: 'Authentifiez-vous pour déverrouiller PassKeyra',
+          options: const AuthenticationOptions(
+            biometricOnly: true,
+            stickyAuth: true,
+            sensitiveTransaction: true,
           ),
-        ],
-      );
+          authMessages: const [
+            AndroidAuthMessages(
+              signInTitle: 'Authentification requise',
+              biometricHint: 'Vérifiez votre identité',
+              cancelButton: 'Annuler',
+              biometricNotRecognized: 'Non reconnu. Réessayez.',
+              goToSettingsButton: 'Paramètres',
+              goToSettingsDescription: 'La biométrie n\'est pas configurée sur cet appareil.',
+              biometricRequiredTitle: 'Biométrie requise',
+            ),
+          ],
+        );
+
+        _isBiometryInProgress = false;
+        if (!mounted) {
+          LockService.instance.clearAutoLockFlag();
+          return;
+        }
+
+        if (!authenticated) {
+          LockService.instance.clearAutoLockFlag();
+          return;
+        }
+
+        debugPrint('LoginPage - Auth local_auth OK, appel unlockWithBiometrics()...');
+        ok = await _auth.unlockWithBiometrics();
+      }
 
       _isBiometryInProgress = false;
-      if (!mounted) {
-        LockService.instance.clearAutoLockFlag();
-        return;
-      }
-
-      if (!authenticated) {
-        // Annulation user ou échec : silencieux, le prompt local_auth a géré l'UX.
-        LockService.instance.clearAutoLockFlag();
-        return;
-      }
-
-      debugPrint('LoginPage - Auth biométrique OK, appel unlockWithBiometrics()...');
-      final ok = await _auth.unlockWithBiometrics();
-      debugPrint('LoginPage - Résultat unlockWithBiometrics: $ok');
+      debugPrint('LoginPage - Resultat unlockWithBiometrics: $ok');
 
       if (!mounted) {
         LockService.instance.clearAutoLockFlag();
@@ -1004,11 +1053,17 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       debugPrint('LoginPage - âŒ PlatformException: ${e.code} - ${e.message}');
       debugPrint('LoginPage - Stack: ${e.stacktrace}');
       
-      // Ne pas afficher d'erreur si l'utilisateur a simplement annulé
-      if (e.code != 'NotAvailable' && 
-          e.code != 'NotEnrolled' && 
+      if (e.code == 'KEY_INVALIDATED' && mounted) {
+        await _showBiometricReEnrollmentDialog();
+        return;
+      }
+
+      // Ne pas afficher d'erreur si l'utilisateur a simplement annule
+      if (e.code != 'NotAvailable' &&
+          e.code != 'NotEnrolled' &&
           e.code != 'UserCanceled' &&
           e.code != 'LockedOut' &&
+          e.code != 'BIOMETRIC_ERROR' &&
           mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppLocalizations.of(context)!.biometricError(e.message ?? e.code))),

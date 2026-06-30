@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 // pas besoin d'import ni d'appel manuel pour bénéficier du PBKDF2 natif Android/iOS.
 
 import 'app/app.dart' show PassKeyraAppShell;
+import 'firebase_options.dart';
 import 'services/auth_service.dart';
 import 'services/backup_repository.dart';
 import 'services/lock_service.dart';
@@ -193,10 +194,15 @@ Future<void> main() async {
   // Initialiser Firebase en arrière-plan (requis pour Cloud Sync Premium uniquement).
   // Firebase n'est pas nécessaire avant que l'utilisateur ouvre une fonction cloud,
   // donc on n'attend pas avant runApp pour ne pas bloquer la 1ʳᵉ frame.
-  Firebase.initializeApp().then((_) {
+  // Sur Android/iOS, le plugin Gradle/Pods charge `google-services.json` et la
+  // signature sans-options fonctionne. Sur Windows/Linux/macOS, on doit fournir
+  // explicitement les options (cf. `firebase_options.dart`).
+  Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  ).then((_) {
     _log('Firebase initialisé avec succès (en arrière-plan)');
   }).catchError((e) {
-    _log('Firebase - Initialisation échouée (normal si google-services.json absent): $e');
+    _log('Firebase - Initialisation échouée: $e');
     _log('  → La synchronisation cloud ne sera pas disponible');
     _log('  → Voir FIREBASE_SETUP.md pour configurer Firebase');
   });

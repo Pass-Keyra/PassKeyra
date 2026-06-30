@@ -158,14 +158,6 @@ class _ImportExportPageState extends State<ImportExportPage>
       message: l10n.premiumTutorialLocalBackupMessage,
       primaryLabel: l10n.onboardingFinish,
       fullWidth: true,
-      onWrongClick: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.onboardingClickHere),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
       stepIndicator: '1 / 1',
     );
 
@@ -190,14 +182,6 @@ class _ImportExportPageState extends State<ImportExportPage>
       message: l10n.discoveryBackupLocalMessage,
       primaryLabel: l10n.onboardingNext,
       secondaryLabel: l10n.onboardingSkipTutorial,
-      onWrongClick: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.onboardingClickHere),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
       stepIndicator: '1 / 2',
     );
 
@@ -220,14 +204,6 @@ class _ImportExportPageState extends State<ImportExportPage>
       message: "Les sauvegardes locales permettent de restaurer les données en cas de besoin. Elles sont stockées sur cet appareil.",
       primaryLabel: l10n.onboardingFinish,
       fullWidth: true,
-      onWrongClick: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.onboardingClickHere),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
       stepIndicator: '2 / 2',
     );
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -8,11 +9,16 @@ import 'package:path_provider/path_provider.dart';
 import '../../models/custom_category.dart';
 import '../../models/password_entry.dart';
 import '../../models/sync_state.dart';
+import '../../platform/platform_capabilities.dart';
 import '../auth_service.dart';
 import '../crypto_service.dart';
 import '../premium_service.dart';
 import '../secure_storage_service.dart';
 import 'firebase_auth_service.dart';
+import 'firestore_gateway.dart';
+import 'rest/firebase_auth_rest_windows.dart';
+import 'rest/firestore_rest_client.dart';
+import 'rest/cloud_debug_log.dart';
 
 /// Service de synchronisation Firebase pour PassKeyra
 ///
@@ -35,14 +41,40 @@ class FirebaseSyncService {
     CryptoService? cryptoService,
   })  : _authService = authService,
         _firebaseAuthService = firebaseAuthService,
-        _firestore = firestore ?? FirebaseFirestore.instance,
-        _cryptoService = cryptoService ?? CryptoService();
+        _firestoreOverride = firestore,
+        _cryptoService = cryptoService ?? CryptoService() {
+    // Desktop : reutiliser l'instance FirebaseAuthRestWindows de
+    // FirebaseAuthService (meme session en memoire). Si null (mobile),
+    // pas de gateway REST.
+    final sharedAuthRest = firebaseAuthService.authRestWindows;
+    if (isDesktop && sharedAuthRest != null) {
+      _gateway = FirestoreGateway(
+        firebaseAuthService: firebaseAuthService,
+        restClient: FirestoreRestClient(
+          authRest: sharedAuthRest,
+          projectId: 'passkeyra',
+        ),
+        authRest: sharedAuthRest,
+      );
+    } else {
+      _gateway = null;
+    }
+  }
 
   final AuthService _authService;
   final FirebaseAuthService _firebaseAuthService;
-  final FirebaseFirestore _firestore;
+  final FirebaseFirestore? _firestoreOverride;
+  FirebaseFirestore get _firestore => _firestoreOverride ?? FirebaseFirestore.instance;
   final CryptoService _cryptoService;
   final SecureStorageService _secureStorage = SecureStorageService();
+
+  // Desktop V1 : gateway REST pour Firestore (les plugins natifs FlutterFire
+  // n'ont pas d'implementation Windows). Null sur mobile.
+  late final FirestoreGateway? _gateway;
+  Timer? _pollingTimer;
+  static const Duration _pollingInterval = Duration(seconds: 30);
+  // Cache des updateTime pour detecter les changements (polling).
+  final Map<String, DateTime> _lastKnownUpdateTimes = {};
 
   void _log(String message) {
     if (kDebugMode) {
@@ -352,18 +384,22 @@ class FirebaseSyncService {
       // FIX FAILLE PREMIUM : exiger isPremium en plus de isSignedIn pour
       // éviter que le listener reste actif après revoke du Premium.
       final isPremium = PremiumService().isPremium;
+      cloudLog('initializeStatus : enabled=true isSignedIn=$isSignedIn isPremium=$isPremium');
       if (isSignedIn && isPremium) {
         _log('FirebaseSyncService - Conditions réunies: démarrage du listener Firestore');
         await _startRealtimeListener();
         _log('FirebaseSyncService - Listener Firestore démarré avec succès');
+        cloudLog('initializeStatus : listener/polling DEMARRE');
       } else if (!isPremium) {
         _log('FirebaseSyncService - Sync activée localement mais user NON-Premium → listener bloqué');
+        cloudLog('initializeStatus : BLOQUE car NON-Premium');
       } else {
         _log('FirebaseSyncService - PROBLÈME: Sync activée mais utilisateur NON connecté !');
-        _log('FirebaseSyncService - Listener Firestore NON démarré');
+        cloudLog('initializeStatus : BLOQUE car NON connecte (isSignedIn=false)');
       }
     } else {
       _log('FirebaseSyncService - Sync désactivée, listener non démarré');
+      cloudLog('initializeStatus : sync DESACTIVEE (enabled=false)');
     }
 
     _log('=========================================================');
@@ -377,37 +413,42 @@ class FirebaseSyncService {
   /// avant d'être envoyées à Firebase (zero-knowledge)
   Future<void> uploadEntry(PasswordEntry entry) async {
     try {
-      final collection = _entriesCollection;
-      if (collection == null) {
-        throw Exception('Aucun utilisateur Firebase connecté');
-      }
-
       final encryptionKey = _authService.currentKey;
       if (encryptionKey == null) {
-        throw Exception('Aucune clé de chiffrement disponible');
+        throw Exception('Aucune cle de chiffrement disponible');
       }
 
-      // Marquer cet ID comme en cours de sync (éviter les boucles)
       _pendingSyncEntryIds.add(entry.id);
 
-      // Chiffrer l'entrée complète
       final entryJson = entry.toJson();
       final encryptedData = _cryptoService.encryptJson(entryJson, encryptionKey);
 
-      // Préparer le document Firestore
-      final docData = {
-        'encryptedData': encryptedData,
-        'lastModified': FieldValue.serverTimestamp(),
-        'version': 1,
-        'deleted': false,
-      };
+      if (isDesktop && _gateway != null) {
+        // Desktop REST
+        final ok = await _gateway!.setEntry(entry.id, {
+          'encryptedData': encryptedData,
+          'lastModified': DateTime.now().toUtc().toIso8601String(),
+          'version': 1,
+          'deleted': false,
+        });
+        if (!ok) throw Exception('Echec upload REST');
+      } else {
+        // Mobile natif
+        final collection = _entriesCollection;
+        if (collection == null) {
+          throw Exception('Aucun utilisateur Firebase connecte');
+        }
+        final docData = {
+          'encryptedData': encryptedData,
+          'lastModified': FieldValue.serverTimestamp(),
+          'version': 1,
+          'deleted': false,
+        };
+        await collection.doc(entry.id).set(docData, SetOptions(merge: true));
+      }
 
-      // Upload vers Firestore (upsert)
-      await collection.doc(entry.id).set(docData, SetOptions(merge: true));
-
-      _log('FirebaseSyncService - Entrée uploadée: ${entry.id}');
+      _log('FirebaseSyncService - Entree uploadee: ${entry.id}');
     } catch (e) {
-      // Retirer de la queue en cas d'erreur
       _pendingSyncEntryIds.remove(entry.id);
       _log('FirebaseSyncService - Erreur upload: $e');
       rethrow;
@@ -421,57 +462,58 @@ class FirebaseSyncService {
     try {
       _updateStatus(_currentStatus.copyWith(state: SyncState.syncing));
 
-      final collection = _entriesCollection;
-      if (collection == null) {
-        throw Exception('Aucun utilisateur Firebase connecté');
-      }
-
       final encryptionKey = _authService.currentKey;
       if (encryptionKey == null) {
         throw Exception('Aucune clé de chiffrement disponible');
       }
 
-      // Upload par batch de 500 (limite Firestore)
-      final batch = _firestore.batch();
-      int count = 0;
-
-      // Collecter les IDs pour les marquer comme pending après le batch
       final uploadedIds = <String>[];
 
-      for (final entry in entries) {
-        uploadedIds.add(entry.id);
-
-        // Chiffrer l'entrée
-        final entryJson = entry.toJson();
-        final encryptedData = _cryptoService.encryptJson(entryJson, encryptionKey);
-
-        final docData = {
-          'encryptedData': encryptedData,
-          'lastModified': FieldValue.serverTimestamp(),
-          'version': 1,
-          'deleted': false,
-        };
-
-        batch.set(
-          collection.doc(entry.id),
-          docData,
-          SetOptions(merge: true),
-        );
-
-        count++;
-
-        // Firestore limite à 500 opérations par batch
-        if (count >= 500) {
-          await batch.commit();
-          count = 0;
-          _log('FirebaseSyncService - Batch de 500 entrées uploadé');
+      if (isDesktop && _gateway != null) {
+        // Desktop REST : upload sequentiel via gateway (pas de batch REST).
+        final batchData = <String, Map<String, dynamic>>{};
+        for (final entry in entries) {
+          uploadedIds.add(entry.id);
+          final encryptedData = _cryptoService.encryptJson(entry.toJson(), encryptionKey);
+          batchData[entry.id] = {
+            'encryptedData': encryptedData,
+            'lastModified': DateTime.now().toUtc().toIso8601String(),
+            'version': 1,
+            'deleted': false,
+          };
         }
-      }
-
-      // Commit le dernier batch
-      if (count > 0) {
-        await batch.commit();
-        _log('FirebaseSyncService - Batch final de $count entrées uploadé');
+        await _gateway!.batchSetEntries(batchData);
+        cloudLog('uploadEntries (desktop REST) : ${uploadedIds.length} entries envoyees');
+      } else {
+        // Mobile natif : batch Firestore (limite 500/batch).
+        final collection = _entriesCollection;
+        if (collection == null) {
+          throw Exception('Aucun utilisateur Firebase connecté');
+        }
+        final batch = _firestore.batch();
+        int count = 0;
+        for (final entry in entries) {
+          uploadedIds.add(entry.id);
+          final entryJson = entry.toJson();
+          final encryptedData = _cryptoService.encryptJson(entryJson, encryptionKey);
+          final docData = {
+            'encryptedData': encryptedData,
+            'lastModified': FieldValue.serverTimestamp(),
+            'version': 1,
+            'deleted': false,
+          };
+          batch.set(collection.doc(entry.id), docData, SetOptions(merge: true));
+          count++;
+          if (count >= 500) {
+            await batch.commit();
+            count = 0;
+            _log('FirebaseSyncService - Batch de 500 entrées uploadé');
+          }
+        }
+        if (count > 0) {
+          await batch.commit();
+          _log('FirebaseSyncService - Batch final de $count entrées uploadé');
+        }
       }
 
       // Marquer les IDs comme pending APRÈS le commit réussi
@@ -522,17 +564,20 @@ class FirebaseSyncService {
       onProgress?.call(0, 0);
       return;
     }
-    final collection = _entriesCollection;
-    if (collection == null) {
-      _log('FirebaseSyncService.forceReuploadAll - utilisateur non connecté, skip');
+    final encryptionKey = _authService.currentKey;
+    if (encryptionKey == null) {
+      _log('FirebaseSyncService.forceReuploadAll - cle absente, skip');
       onProgress?.call(entries.length, entries.length);
       return;
     }
-    final encryptionKey = _authService.currentKey;
-    if (encryptionKey == null) {
-      _log('FirebaseSyncService.forceReuploadAll - clé absente, skip');
-      onProgress?.call(entries.length, entries.length);
-      return;
+
+    if (!isDesktop) {
+      final collection = _entriesCollection;
+      if (collection == null) {
+        _log('FirebaseSyncService.forceReuploadAll - utilisateur non connecte, skip');
+        onProgress?.call(entries.length, entries.length);
+        return;
+      }
     }
 
     _updateStatus(_currentStatus.copyWith(state: SyncState.syncing));
@@ -548,22 +593,42 @@ class FirebaseSyncService {
       for (var i = 0; i < total; i += chunkSize) {
         final end = (i + chunkSize < total) ? i + chunkSize : total;
         final chunk = entries.sublist(i, end);
-        final batch = _firestore.batch();
-        for (final entry in chunk) {
-          uploadedIds.add(entry.id);
-          final encryptedData = _cryptoService.encryptJson(entry.toJson(), encryptionKey);
-          batch.set(
-            collection.doc(entry.id),
-            {
+
+        if (isDesktop && _gateway != null) {
+          // Desktop REST : upload sequentiel (pas de batch REST)
+          final batchData = <String, Map<String, dynamic>>{};
+          for (final entry in chunk) {
+            uploadedIds.add(entry.id);
+            final encryptedData = _cryptoService.encryptJson(entry.toJson(), encryptionKey);
+            batchData[entry.id] = {
               'encryptedData': encryptedData,
-              'lastModified': FieldValue.serverTimestamp(),
+              'lastModified': DateTime.now().toUtc().toIso8601String(),
               'version': 1,
               'deleted': false,
-            },
-            SetOptions(merge: true),
-          );
+            };
+          }
+          await _gateway!.batchSetEntries(batchData);
+        } else {
+          // Mobile natif : batch Firestore
+          final batch = _firestore.batch();
+          final collection = _entriesCollection!;
+          for (final entry in chunk) {
+            uploadedIds.add(entry.id);
+            final encryptedData = _cryptoService.encryptJson(entry.toJson(), encryptionKey);
+            batch.set(
+              collection.doc(entry.id),
+              {
+                'encryptedData': encryptedData,
+                'lastModified': FieldValue.serverTimestamp(),
+                'version': 1,
+                'deleted': false,
+              },
+              SetOptions(merge: true),
+            );
+          }
+          await batch.commit();
         }
-        await batch.commit();
+
         done = end;
         onProgress?.call(done, total);
         _log('FirebaseSyncService.forceReuploadAll - chunk $done/$total OK');
@@ -604,31 +669,41 @@ class FirebaseSyncService {
   ///
   /// No-op silencieuse si pas d'utilisateur Firestore connecté ou pas de clé.
   Future<void> uploadKeyFingerprint() async {
-    final doc = _keyFingerprintDocument;
-    if (doc == null) return;
     final key = _authService.currentKey;
     if (key == null) return;
     try {
       final fingerprint = _cryptoService.keyFingerprint(key);
-      await doc.set({
-        'fingerprint': fingerprint,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      _log('FirebaseSyncService - keyFingerprint uploadé');
+      if (isDesktop && _gateway != null) {
+        await _gateway!.setKeyFingerprint({
+          'fingerprint': fingerprint,
+          'updatedAt': DateTime.now().toUtc().toIso8601String(),
+        });
+      } else {
+        final doc = _keyFingerprintDocument;
+        if (doc == null) return;
+        await doc.set({
+          'fingerprint': fingerprint,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+      _log('FirebaseSyncService - keyFingerprint uploade');
     } catch (e) {
       _log('FirebaseSyncService - erreur uploadKeyFingerprint: $e');
     }
   }
 
-  /// Lit le fingerprint de la clé stocké côté Firestore. Retourne null si
-  /// pas de document, pas d'utilisateur connecté, ou erreur réseau.
   Future<String?> getCloudKeyFingerprint() async {
-    final doc = _keyFingerprintDocument;
-    if (doc == null) return null;
     try {
-      final snapshot = await doc.get();
-      if (!snapshot.exists) return null;
-      return snapshot.data()?['fingerprint'] as String?;
+      if (isDesktop && _gateway != null) {
+        final data = await _gateway!.getKeyFingerprint();
+        return data?['fingerprint'] as String?;
+      } else {
+        final doc = _keyFingerprintDocument;
+        if (doc == null) return null;
+        final snapshot = await doc.get();
+        if (!snapshot.exists) return null;
+        return snapshot.data()?['fingerprint'] as String?;
+      }
     } catch (e) {
       _log('FirebaseSyncService - erreur getCloudKeyFingerprint: $e');
       return null;
@@ -688,35 +763,45 @@ class FirebaseSyncService {
     try {
       _updateStatus(_currentStatus.copyWith(state: SyncState.syncing));
 
-      final collection = _entriesCollection;
-      if (collection == null) {
-        throw Exception('Aucun utilisateur Firebase connecté');
-      }
-
       final encryptionKey = _authService.currentKey;
       if (encryptionKey == null) {
         throw Exception('Aucune clé de chiffrement disponible');
       }
 
-      final querySnapshot = await collection
-          .where('deleted', isEqualTo: false)
-          .get();
-
       final entries = <PasswordEntry>[];
 
-      for (final doc in querySnapshot.docs) {
-        try {
-          final data = doc.data();
-          final encryptedData = data['encryptedData'] as String;
-          final decryptedJson = _cryptoService.decryptToJson(
-            encryptedData,
-            encryptionKey,
-          );
-
-          entries.add(PasswordEntry.fromJson(decryptedJson));
-        } catch (e) {
-          _log('FirebaseSyncService - Erreur déchiffrement entrée ${doc.id}: $e');
-          // Continue avec les autres entrées
+      if (isDesktop && _gateway != null) {
+        // Desktop REST
+        final rawEntries = await _gateway!.listEntries();
+        for (final raw in rawEntries) {
+          if (raw['deleted'] == true) continue;
+          final encryptedData = raw['encryptedData'];
+          if (encryptedData is! String) continue;
+          try {
+            final decryptedJson = _cryptoService.decryptToJson(encryptedData, encryptionKey);
+            entries.add(PasswordEntry.fromJson(decryptedJson));
+          } catch (e) {
+            _log('FirebaseSyncService - Erreur dechiffrement (REST): $e');
+          }
+        }
+      } else {
+        // Mobile natif
+        final collection = _entriesCollection;
+        if (collection == null) {
+          throw Exception('Aucun utilisateur Firebase connecté');
+        }
+        final querySnapshot = await collection
+            .where('deleted', isEqualTo: false)
+            .get();
+        for (final doc in querySnapshot.docs) {
+          try {
+            final data = doc.data();
+            final encryptedData = data['encryptedData'] as String;
+            final decryptedJson = _cryptoService.decryptToJson(encryptedData, encryptionKey);
+            entries.add(PasswordEntry.fromJson(decryptedJson));
+          } catch (e) {
+            _log('FirebaseSyncService - Erreur déchiffrement entrée ${doc.id}: $e');
+          }
         }
       }
 
@@ -747,44 +832,45 @@ class FirebaseSyncService {
       _log('FirebaseSyncService - Force sync depuis le cloud...');
       _updateStatus(_currentStatus.copyWith(state: SyncState.syncing));
 
-      final collection = _entriesCollection;
-      if (collection == null) {
-        throw Exception('Aucun utilisateur Firebase connecté');
-      }
-
       final encryptionKey = _authService.currentKey;
       if (encryptionKey == null) {
         throw Exception('Aucune clé de chiffrement disponible');
       }
 
-      // Récupérer TOUS les documents (incluant deleted: true)
-      final querySnapshot = await collection.get();
-
       final activeEntries = <PasswordEntry>[];
       final deletedEntryIds = <String>[];
 
-      for (final doc in querySnapshot.docs) {
-        try {
-          final data = doc.data();
-          final isDeleted = data['deleted'] == true;
+      // Recuperer tous les documents bruts (REST sur desktop, natif sur mobile).
+      final List<Map<String, dynamic>> allDocs;
+      if (isDesktop && _gateway != null) {
+        allDocs = await _gateway!.listEntries();
+      } else {
+        final collection = _entriesCollection;
+        if (collection == null) {
+          throw Exception('Aucun utilisateur Firebase connecté');
+        }
+        final querySnapshot = await collection.get();
+        allDocs = querySnapshot.docs
+            .map((d) => <String, dynamic>{'id': d.id, ...d.data()})
+            .toList();
+      }
 
+      for (final data in allDocs) {
+        final id = data['id'] as String;
+        try {
+          final isDeleted = data['deleted'] == true;
           if (isDeleted) {
-            // Entrée supprimée
-            deletedEntryIds.add(doc.id);
+            deletedEntryIds.add(id);
           } else {
-            // Entrée active - déchiffrer
             final encryptedData = data['encryptedData'] as String;
-            final decryptedJson = _cryptoService.decryptToJson(
-              encryptedData,
-              encryptionKey,
-            );
+            final decryptedJson = _cryptoService.decryptToJson(encryptedData, encryptionKey);
             activeEntries.add(PasswordEntry.fromJson(decryptedJson));
           }
         } catch (e) {
-          _log('FirebaseSyncService - Erreur traitement entrée ${doc.id}: $e');
-          // Continue avec les autres entrées
+          _log('FirebaseSyncService - Erreur traitement entrée $id: $e');
         }
       }
+      cloudLog('forceSyncFromCloud : ${activeEntries.length} actives, ${deletedEntryIds.length} supprimees');
 
       // Notifier les suppressions d'abord
       if (deletedEntryIds.isNotEmpty && onCloudEntriesDeleted != null) {
@@ -828,17 +914,23 @@ class FirebaseSyncService {
   /// Permet d'éviter la recréation par sync bidirectionnelle
   Future<void> deleteEntry(String entryId) async {
     try {
-      final collection = _entriesCollection;
-      if (collection == null) {
-        throw Exception('Aucun utilisateur Firebase connecté');
+      if (isDesktop && _gateway != null) {
+        // Soft delete via REST : on set deleted=true (comme mobile).
+        await _gateway!.setEntry(entryId, {
+          'deleted': true,
+          'lastModified': DateTime.now().toUtc().toIso8601String(),
+        });
+      } else {
+        final collection = _entriesCollection;
+        if (collection == null) {
+          throw Exception('Aucun utilisateur Firebase connecte');
+        }
+        await collection.doc(entryId).update({
+          'deleted': true,
+          'lastModified': FieldValue.serverTimestamp(),
+        });
       }
-
-      await collection.doc(entryId).update({
-        'deleted': true,
-        'lastModified': FieldValue.serverTimestamp(),
-      });
-
-      _log('FirebaseSyncService - Entrée supprimée: $entryId');
+      _log('FirebaseSyncService - Entree supprimee: $entryId');
     } catch (e) {
       _log('FirebaseSyncService - Erreur suppression: $e');
       rethrow;
@@ -869,11 +961,18 @@ class FirebaseSyncService {
   /// Permet de recevoir automatiquement les modifications faites
   /// depuis un autre appareil et les merge avec le vault local
   Future<void> _startRealtimeListener() async {
+    // Desktop : pas de listener natif Firestore. On demarre un polling
+    // periodique qui liste les entries REST et detecte les changements.
+    if (isDesktop && _gateway != null) {
+      await _startDesktopPolling();
+      return;
+    }
+
     try {
       final collection = _entriesCollection;
       if (collection == null) return;
 
-      // Arrêter le listener précédent si existant
+      // Arreter le listener precedent si existant
       await _stopRealtimeListener();
 
       _firestoreListener = collection
@@ -1017,32 +1116,131 @@ class FirebaseSyncService {
     }
   }
 
-  /// Arrête l'écoute temps réel (entrées et catégories)
+  /// Arrete l'ecoute temps reel (entrees et categories) + polling desktop.
   Future<void> _stopRealtimeListener() async {
     await _firestoreListener?.cancel();
     _firestoreListener = null;
     await _categoriesListener?.cancel();
     _categoriesListener = null;
-    _log('FirebaseSyncService - Listener temps réel arrêté');
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+    _log('FirebaseSyncService - Listener/polling arrete');
+  }
+
+  /// Desktop : demarre un polling periodique qui liste les entries via REST
+  /// et detecte les ajouts/modifications/suppressions par comparaison avec
+  /// le cache local `_lastKnownUpdateTimes`.
+  Future<void> _startDesktopPolling() async {
+    _pollingTimer?.cancel();
+    _log('FirebaseSyncService - Demarrage polling desktop (${_pollingInterval.inSeconds}s)');
+
+    // Premier poll immediat pour synchro initiale.
+    await _pollFirestoreEntries();
+
+    _pollingTimer = Timer.periodic(_pollingInterval, (_) async {
+      if (!PremiumService().isPremium) return;
+      await _pollFirestoreEntries();
+    });
+  }
+
+  Future<void> _pollFirestoreEntries() async {
+    try {
+      final gw = _gateway;
+      if (gw == null) {
+        cloudLog('poll : gateway null, abort');
+        return;
+      }
+      final encryptionKey = _authService.currentKey;
+      if (encryptionKey == null) {
+        cloudLog('poll : cle absente, abort');
+        return;
+      }
+
+      final rawEntries = await gw.listEntries();
+      final cloudChanges = <PasswordEntry>[];
+      final cloudDeletions = <String>[];
+      int decryptOk = 0;
+      int decryptFail = 0;
+
+      for (final raw in rawEntries) {
+        final id = raw['id'] as String;
+
+        // Ignorer nos propres uploads recents.
+        if (_pendingSyncEntryIds.contains(id)) {
+          _pendingSyncEntryIds.remove(id);
+          continue;
+        }
+
+        final isDeleted = raw['deleted'] == true;
+        if (isDeleted) {
+          cloudDeletions.add(id);
+          continue;
+        }
+
+        final encryptedData = raw['encryptedData'];
+        if (encryptedData is! String) continue;
+
+        try {
+          final decryptedJson = _cryptoService.decryptToJson(encryptedData, encryptionKey);
+          final cloudEntry = PasswordEntry.fromJson(decryptedJson);
+          cloudChanges.add(cloudEntry);
+          decryptOk++;
+        } catch (e) {
+          decryptFail++;
+          _log('  - Erreur dechiffrement entry $id: $e');
+        }
+      }
+
+      cloudLog('poll : ${rawEntries.length} recues, dechiffrement OK=$decryptOk ECHEC=$decryptFail');
+
+      if (cloudDeletions.isNotEmpty && onCloudEntriesDeleted != null) {
+        onCloudEntriesDeleted!(cloudDeletions);
+      }
+      if (cloudChanges.isNotEmpty && onCloudEntriesChanged != null) {
+        onCloudEntriesChanged!(cloudChanges);
+      }
+
+      _updateStatus(_currentStatus.copyWith(
+        state: SyncState.success,
+        lastSync: DateTime.now(),
+      ));
+    } catch (e) {
+      _log('FirebaseSyncService - Erreur polling: $e');
+      _updateStatus(_currentStatus.copyWith(
+        state: SyncState.error,
+        errorMessage: e.toString(),
+      ));
+    }
   }
 
   /// Upload la liste complète des catégories chiffrées vers Firestore
   Future<void> uploadCategories(List<CustomCategory> categories) async {
     try {
-      final doc = _categoriesDocument;
-      if (doc == null) throw Exception('Aucun utilisateur Firebase connecté');
       final encryptionKey = _authService.currentKey;
-      if (encryptionKey == null) throw Exception('Aucune clé de chiffrement disponible');
+      if (encryptionKey == null) throw Exception('Aucune cle de chiffrement disponible');
 
       final payload = {'categories': categories.map((c) => c.toJson()).toList()};
       final encryptedData = _cryptoService.encryptJson(payload, encryptionKey);
 
       _categoriesUploadPending = true;
-      await doc.set({
-        'encryptedData': encryptedData,
-        'lastModified': FieldValue.serverTimestamp(),
-        'version': 1,
-      });
+
+      if (isDesktop && _gateway != null) {
+        await _gateway!.setCategories({
+          'encryptedData': encryptedData,
+          'lastModified': DateTime.now().toUtc().toIso8601String(),
+          'version': 1,
+          'schema_version': 2,
+        });
+      } else {
+        final doc = _categoriesDocument;
+        if (doc == null) throw Exception('Aucun utilisateur Firebase connecte');
+        await doc.set({
+          'encryptedData': encryptedData,
+          'lastModified': FieldValue.serverTimestamp(),
+          'version': 1,
+          'schema_version': 2,
+        });
+      }
 
       // Libérer le flag après un délai (au cas où le listener ne se déclenche pas)
       Future.delayed(const Duration(seconds: 10), () {
@@ -1060,14 +1258,20 @@ class FirebaseSyncService {
   /// Télécharge et déchiffre les catégories depuis Firestore
   Future<List<CustomCategory>> downloadCategories() async {
     try {
-      final doc = _categoriesDocument;
-      if (doc == null) return [];
       final encryptionKey = _authService.currentKey;
       if (encryptionKey == null) return [];
 
-      final snapshot = await doc.get();
-      if (!snapshot.exists) return [];
-      final data = snapshot.data();
+      Map<String, dynamic>? data;
+      if (isDesktop && _gateway != null) {
+        data = await _gateway!.getCategories();
+      } else {
+        final doc = _categoriesDocument;
+        if (doc == null) return [];
+        final snapshot = await doc.get();
+        if (!snapshot.exists) return [];
+        data = snapshot.data();
+      }
+
       if (data == null || !data.containsKey('encryptedData')) return [];
 
       final encryptedData = data['encryptedData'] as String;
@@ -1079,7 +1283,7 @@ class FirebaseSyncService {
           .map((c) => CustomCategory.fromJson(c as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      _log('FirebaseSyncService - Erreur download catégories: $e');
+      _log('FirebaseSyncService - Erreur download categories: $e');
       return [];
     }
   }

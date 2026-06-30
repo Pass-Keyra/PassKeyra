@@ -6,10 +6,15 @@ class CustomCategory {
   final int colorValue; // Color.value (int)
   final int iconCodePoint; // IconData.codePoint
   final int order;
-  final bool isDefault; // true pour les catégories par défaut
+  final bool isDefault; // true pour les categories par defaut
   final bool isDeletable; // false pour "Autre"
-  final String? emoji; // Emoji personnalisé (Premium) - XOR avec iconCodePoint
-  final bool isRoundShape; // true = rond, false = carré (Premium, seulement pour emoji)
+  final String? emoji; // Emoji personnalise (Premium) - XOR avec iconCodePoint
+  final bool isRoundShape; // true = rond, false = carre (Premium, seulement pour emoji)
+  // Sous-categories : si non-null, cette categorie est un enfant de la
+  // categorie identifiee par parentId. Profondeur max 3. Null = racine.
+  // Retrocompat schema v1 : les anciennes sauvegardes n'ont pas ce champ,
+  // fromJson l'hydrate a null automatiquement.
+  final String? parentId;
 
   CustomCategory({
     required this.id,
@@ -21,18 +26,17 @@ class CustomCategory {
     this.isDeletable = true,
     this.emoji,
     this.isRoundShape = false,
+    this.parentId,
   });
 
-  // Getter pour obtenir l'objet Color
   Color get color => Color(colorValue);
 
-  // Getter pour obtenir l'objet IconData
   IconData get icon => IconData(iconCodePoint, fontFamily: 'MaterialIcons', matchTextDirection: false);
 
-  // Vérifier si la catégorie utilise un emoji (Premium)
   bool get isEmoji => emoji != null && emoji!.isNotEmpty;
 
-  // Conversion vers JSON
+  bool get isRoot => parentId == null;
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -44,10 +48,10 @@ class CustomCategory {
       'isDeletable': isDeletable,
       'emoji': emoji,
       'isRoundShape': isRoundShape,
+      if (parentId != null) 'parentId': parentId,
     };
   }
 
-  // Création depuis JSON
   factory CustomCategory.fromJson(Map<String, dynamic> json) {
     return CustomCategory(
       id: json['id'] as String,
@@ -59,10 +63,10 @@ class CustomCategory {
       isDeletable: json['isDeletable'] as bool? ?? true,
       emoji: json['emoji'] as String?,
       isRoundShape: json['isRoundShape'] as bool? ?? false,
+      parentId: json['parentId'] as String?,
     );
   }
 
-  // Copie avec modifications
   CustomCategory copyWith({
     String? id,
     String? name,
@@ -73,6 +77,7 @@ class CustomCategory {
     bool? isDeletable,
     String? emoji,
     bool? isRoundShape,
+    String? Function()? parentId,
   }) {
     return CustomCategory(
       id: id ?? this.id,
@@ -84,6 +89,11 @@ class CustomCategory {
       isDeletable: isDeletable ?? this.isDeletable,
       emoji: emoji ?? this.emoji,
       isRoundShape: isRoundShape ?? this.isRoundShape,
+      // Trick pour distinguer "pas passe" (null) de "explicitement null".
+      // copyWith(parentId: () => null) met parentId a null.
+      // copyWith(parentId: () => 'abc') met parentId a 'abc'.
+      // copyWith() sans parentId garde la valeur existante.
+      parentId: parentId != null ? parentId() : this.parentId,
     );
   }
 

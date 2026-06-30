@@ -172,10 +172,6 @@ class _CloudBackupPageState extends State<CloudBackupPage>
         primaryLabel: primaryLabel ?? l10n.onboardingNext,
         secondaryLabel: secondaryLabel ?? l10n.onboardingSkipTutorial,
         stepIndicator: stepIndicator,
-        onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.onboardingClickHere),
-              duration: const Duration(seconds: 1)),
-        ),
       );
       return result == CoachStepResult.primary && mounted;
     }
@@ -206,9 +202,6 @@ class _CloudBackupPageState extends State<CloudBackupPage>
         primaryLabel: l10n.onboardingFinish,
         fullWidth: true,
         stepIndicator: '1 / 1',
-        onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.onboardingClickHere), duration: const Duration(seconds: 1)),
-        ),
       );
       cleanup();
       // Phase 1 vue (terminée ou skippée) : on la marque pour éviter le re-fire.
@@ -311,9 +304,6 @@ class _CloudBackupPageState extends State<CloudBackupPage>
       title: l10n.premiumTutorialAutoBackupTitle,
       message: l10n.premiumTutorialAutoBackupMessage,
       primaryLabel: l10n.onboardingFinish,
-      onWrongClick: () => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.onboardingClickHere), duration: const Duration(seconds: 1)),
-      ),
       stepIndicator: '1 / 1',
     );
     if (mounted) setState(() { _isTutorialRunning = false; _activeTargetKey = null; });
